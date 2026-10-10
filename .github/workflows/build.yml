@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows (Visual Studio)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "dist/CodeVoDai"
+          New-Item -ItemType Directory -Force "$out/bai-hoc-exe" | Out-Null
+          Copy-Item build/Release/CodeVoDai.exe $out/
+          Copy-Item -Recurse assets "$out/assets"
+          Copy-Item -Recurse lessons "$out/bai-hoc-code"
+          Copy-Item build/lessons/Release/*.exe "$out/bai-hoc-exe/"
+          Copy-Item README.md $out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CodeVoDai-Windows
+          path: dist/CodeVoDai
+
+  linux:
+    name: Linux (GCC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-Wall -Wextra"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Run console lessons
+        run: |
+          for f in build/lessons/bai_*; do
+            case "$f" in *13_camera_raylib*) continue ;; esac
+            echo "== $f"
+            "$f" < /dev/null > /dev/null
+          done
