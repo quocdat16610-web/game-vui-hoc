@@ -57,7 +57,11 @@ struct Fighter {
 void DrawFighterModel(const Fighter& f, bool animate, float time);
 
 namespace arena {
+    void Init();
+    void Shutdown();
     void Enter();
     bool Update(float dt);     // trả về true khi muốn quay lại văn phòng
-    void Draw();
+    void RenderOffscreen();    // bóng đổ + màn hình LED (gọi trước khi vẽ cảnh)
+    void Draw3D();
+    void DrawHUD();
 }

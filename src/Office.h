@@ -11,9 +11,10 @@ namespace office {
 
     void   Init();
     void   Shutdown();
-    void   RenderScreens();                 // vẽ màn hình máy tính (render texture) — gọi TRƯỚC BeginDrawing
+    void   RenderOffscreen();               // màn hình máy tính + bóng đổ — gọi TRƯỚC khi vẽ cảnh
     Action Update(float dt, bool titleMode);
-    void   Draw(bool titleMode);
+    void   Draw3D();
+    void   DrawHUD(bool titleMode);
     void   Say(const std::string& msg, float seconds = 6.0f);   // lời thoại của anh dev
     bool   ModalOpen();
 }

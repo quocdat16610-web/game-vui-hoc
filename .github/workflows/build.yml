@@ -54,7 +54,7 @@ jobs:
       - name: Run console lessons
         run: |
           for f in build/lessons/bai_*; do
-            case "$f" in *13_camera_raylib*) continue ;; esac
+            case "$f" in *13_camera_raylib*|*15_shader_anh_sang*|*16_am_thanh*) continue ;; esac
             echo "== $f"
             "$f" < /dev/null > /dev/null
           done

@@ -23,6 +23,8 @@ enum Feature {
     F_AI,            // Bài 12: AI                    -> đối thủ biết đánh
     F_CAMERA_FX,     // Bài 13: camera & render       -> camera động, rung, hit-stop
     F_ROUNDS,        // Bài 14: kiến trúc game        -> hiệp đấu, đồng hồ, độ khó
+    F_NEON_STAGE,    // Bài 15: shader & ánh sáng     -> sân khấu Neon ban đêm
+    F_MUSIC,         // Bài 16: âm thanh              -> nhạc nền chiptune
     F_COUNT
 };
 
@@ -34,6 +36,7 @@ struct Progress {
     int stars[F_COUNT] = {};      // số sao mỗi bài (0..3)
     int wins = 0;                 // số trận thắng ở võ đài
     bool introSeen = false;
+    int gfxQuality = 2;           // 0 thấp, 1 trung bình, 2 cao
 
     bool Has(Feature f) const { return completed > (int)f; }
     void Load();

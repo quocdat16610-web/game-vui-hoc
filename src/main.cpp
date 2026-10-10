@@ -7,7 +7,9 @@
 // =============================================================================
 #include "raylib.h"
 #include "Arena.h"
+#include "Audio.h"
 #include "Common.h"
+#include "Gfx.h"
 #include "LessonScreen.h"
 #include "Lessons.h"
 #include "Office.h"
@@ -47,8 +49,8 @@ static void DrawTitle(float time) {
                                     g_progress.TotalStars(), g_progress.wins),
                          W / 2, H * 0.68f + 40 * s, 17 * s, pal::dim);
 
-    ui::Text("14 bài · Cơ bản → Trung cấp → Nâng cao", 20 * s, H - 34 * s, 15 * s, pal::dim);
-    std::string r = "F11: toàn màn hình    Alt+F4: thoát";
+    ui::Text(TextFormat("%d bài · Cơ bản → Trung cấp → Nâng cao", (int)F_COUNT), 20 * s, H - 34 * s, 15 * s, pal::dim);
+    std::string r = "F2: đồ họa    M: âm thanh    F11: toàn màn hình";
     ui::Text(r, W - ui::Measure(r, 15 * s).x - 20 * s, H - 34 * s, 15 * s, pal::dim);
 }
 
@@ -65,12 +67,19 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--unlock-all") == 0) g_progress.completed = F_COUNT;
         if (std::strcmp(argv[i], "--reset") == 0) g_progress = Progress{};
+        if (std::strncmp(argv[i], "--gfx=", 6) == 0) g_progress.gfxQuality = std::atoi(argv[i] + 6);
         if (std::strncmp(argv[i], "--lessons=", 10) == 0) g_progress.completed = std::clamp(std::atoi(argv[i] + 10), 0, (int)F_COUNT);
     }
+    gfx::Init();
+    gfx::SetQuality(g_progress.gfxQuality);
+    sfx::Init();
+    arena::Init();
     office::Init();
 
     Screen screen = Screen::Title;
     float time = 0;
+    std::string toast;            // thông báo nhỏ góc màn hình
+    float toastTime = 0;
 
     // ======================= GAME LOOP =======================
     while (!WindowShouldClose()) {
@@ -79,6 +88,19 @@ int main(int argc, char** argv) {
         time += dt;
 
         if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
+        if (IsKeyPressed(KEY_F2)) {                    // đổi chất lượng đồ họa
+            gfx::SetQuality((gfx::GetQuality() + 1) % 3);
+            g_progress.gfxQuality = gfx::GetQuality();
+            g_progress.Save();
+            toast = std::string("Đồ họa: ") + gfx::QualityName();
+            toastTime = 2.0f;
+        }
+        if (IsKeyPressed(KEY_M)) {
+            sfx::ToggleMute();
+            toast = sfx::Muted() ? "Âm thanh: TẮT" : "Âm thanh: BẬT";
+            toastTime = 2.0f;
+        }
+        toastTime -= dt;
 
         // ---------------- 1. UPDATE ----------------
         switch (screen) {
@@ -86,6 +108,7 @@ int main(int argc, char** argv) {
             office::Update(dt, true);
             if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                 screen = Screen::Office;
+                sfx::Play(sfx::CLICK, 0);
                 if (!g_progress.introSeen) {
                     office::Say(INTRO, 14);
                     g_progress.introSeen = true;
@@ -106,6 +129,7 @@ int main(int argc, char** argv) {
                 g_progress.Save();
                 office::Say("[F10] Đã mở khóa toàn bộ bài học và tính năng.", 4);
             }
+            if (act != office::Action::None) sfx::Play(sfx::CLICK, 0);
             if (act == office::Action::OpenComputer) {
                 lessonscreen::Open(std::min(g_progress.completed, (int)F_COUNT - 1));
                 screen = Screen::Lesson;
@@ -133,22 +157,51 @@ int main(int argc, char** argv) {
             break;
         }
 
-        // Màn hình máy tính trong phòng là một render texture, phải vẽ trước BeginDrawing
-        if (screen != Screen::Arena) office::RenderScreens();
+        sfx::Update(screen == Screen::Arena && g_progress.Has(F_MUSIC));
 
         // ---------------- 2. DRAW ----------------
+        // a) Các thứ vẽ "ngoài màn hình": bóng đổ, màn hình máy tính, bảng LED
+        if (screen == Screen::Arena) arena::RenderOffscreen();
+        else office::RenderOffscreen();
+
+        // b) Cảnh 3D. Đồ họa cao: vẽ vào texture rồi xử lý hậu kỳ (bloom, FXAA...)
+        auto draw3D = [&] {
+            if (screen == Screen::Arena) arena::Draw3D();
+            else office::Draw3D();
+        };
+        bool post = gfx::PostEnabled();
+        if (post) {
+            gfx::BeginScene();
+            draw3D();
+            gfx::EndScene();
+        }
+
         BeginDrawing();
         ClearBackground(pal::bg);
+        if (post) gfx::PresentScene();
+        else draw3D();
+
+        // c) Giao diện 2D vẽ sau cùng, nằm trên cảnh 3D
         switch (screen) {
-        case Screen::Title:  office::Draw(true);  DrawTitle(time); break;
-        case Screen::Office: office::Draw(false); break;
-        case Screen::Lesson: office::Draw(true);  lessonscreen::Draw(); break;
-        case Screen::Arena:  arena::Draw(); break;
+        case Screen::Title:  DrawTitle(time); break;
+        case Screen::Office: office::DrawHUD(false); break;
+        case Screen::Lesson: lessonscreen::Draw(); break;
+        case Screen::Arena:  arena::DrawHUD(); break;
+        }
+        if (toastTime > 0) {
+            float s = ui::S();
+            Vector2 m = ui::Measure(toast, 18 * s, FS_BOLD);
+            Rectangle r = { GetScreenWidth() - m.x - 44 * s, 60 * s, m.x + 28 * s, 38 * s };
+            ui::Panel(r, Fade(pal::bg, 0.92f), pal::accent, 0.3f);
+            ui::Text(toast, r.x + 14 * s, r.y + 9 * s, 18 * s, pal::text, FS_BOLD);
         }
         EndDrawing();
     }
 
     office::Shutdown();
+    arena::Shutdown();
+    sfx::Shutdown();
+    gfx::Shutdown();
     ui::UnloadFonts();
     CloseWindow();
     return 0;

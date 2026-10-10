@@ -6,6 +6,8 @@
 //  Các dòng if (g_progress.Has(F_...)) là "công tắc" mở khóa tính năng.
 // =============================================================================
 #include "Arena.h"
+#include "Audio.h"
+#include "Gfx.h"
 #include "Common.h"
 #include "Lessons.h"
 #include "UI.h"
@@ -13,6 +15,7 @@
 #include "rlgl.h"
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <vector>
 
 // -----------------------------------------------------------------------------
@@ -48,7 +51,7 @@ namespace {
         int   difficulty  = 1;   // 0 dễ, 1 thường, 2 khó
     };
 
-    struct Particle { Vector3 pos, vel; float life, maxLife, size; Color color; };
+    struct Particle { Vector3 pos, vel; float life, maxLife, size; Color color; bool confetti = false; float spin = 0; };
     struct Popup    { Vector3 pos; std::string text; float life; Color color; float size; };
 
     // Bài 12: bộ não AI
@@ -77,6 +80,13 @@ namespace {
         std::string hint;
         float hintTime = 0;
         bool  wantExit = false;
+        int   stage = 0;                 // 0 sân đấu ban ngày, 1 sân khấu Neon (Bài 15)
+        float slowMo = 0;                // thời gian chạy chậm sau cú K.O.
+        float flash = 0;                 // chớp trắng màn hình
+        Vector3 hitLightPos = { 0, 0, 0 };
+        float hitLightTime = 0;          // đèn chớp tại điểm trúng đòn
+        RenderTexture2D screen = {};     // màn hình LED lớn phía sau
+        bool  screenOk = false;
     };
     ArenaState S;
 }
@@ -270,7 +280,13 @@ static void SpawnSparks(Vector3 at, int count, Color c, float dir) {
 
 static void UpdateParticles(float dt) {
     for (auto& p : S.particles) {
-        p.vel.y += GRAVITY * 0.5f * dt;
+        if (p.confetti) {
+            p.vel.x += std::sin(S.time * 3 + p.spin) * dt * 2;   // pháo giấy bay lả tả
+            p.spin += dt * 400;
+            if (p.pos.y < 0.02f) { p.pos.y = 0.02f; p.vel = { 0, 0, 0 }; }
+        } else {
+            p.vel.y += GRAVITY * 0.5f * dt;
+        }
         p.pos = Vector3Add(p.pos, Vector3Scale(p.vel, dt));
         p.life -= dt;
     }
@@ -329,13 +345,21 @@ static void ApplyHit(Fighter& a, Fighter& b, bool kick) {
                          blocked ? "ĐỠ!" : TextFormat("-%d", (int)std::round(dmg)),
                          0.9f, blocked ? pal::accent2 : (kick ? pal::accent : WHITE), blocked ? 26.0f : 30.0f });
 
+    S.hitLightPos = contact;
+    S.hitLightTime = 0.15f;
     if (Has(F_PARTICLES))
         SpawnSparks(contact, blocked ? 12 : (kick ? 34 : 24), blocked ? pal::accent2 : pal::accent, dir);
 
     if (Has(F_CAMERA_FX)) {
         S.hitStop = ko ? 0.25f : (kick ? 0.10f : 0.06f);
         S.shake   = ko ? 0.60f : (blocked ? 0.10f : (kick ? 0.40f : 0.22f));
+        if (ko) { S.slowMo = 1.1f; S.flash = 0.6f; }      // K.O.: chớp trắng + quay chậm
     }
+
+    // Âm thanh (Bài 16)
+    if (ko) sfx::Play(sfx::KO, 0.03f);
+    else if (blocked) sfx::Play(sfx::BLOCK);
+    else sfx::Play(kick ? sfx::KICK : sfx::PUNCH, 0.1f);
 }
 
 static void CheckAttack(Fighter& a, Fighter& b) {
@@ -381,17 +405,20 @@ static void UpdateFighter(Fighter& f, const Input& in, const Fighter& foe, float
         } else if (in.punch) {
             f.ChangeState(FState::Punch);
             f.stats["Số lần ra đòn"]++;
+            sfx::Play(sfx::WHOOSH, 0.15f, 0.35f);
         } else if (in.kick) {
             f.ChangeState(FState::Kick);
             f.stats["Số lần ra đòn"]++;
+            sfx::Play(sfx::WHOOSH, 0.15f, 0.5f);
         } else {
             FState next = (in.moveX != 0) ? FState::Walk : FState::Idle;
             if (next != f.state) f.ChangeState(next);
-            if (in.jump && f.onGround) { f.vel.y = JUMP_VEL; f.onGround = false; }
+            if (in.jump && f.onGround) { f.vel.y = JUMP_VEL; f.onGround = false; sfx::Play(sfx::JUMP, 0.05f, 0.6f); }
             if (in.dash && f.dashCooldown <= 0 && in.moveX != 0) {
                 f.dashTimer = 0.18f;
                 f.dashCooldown = 0.8f;
                 f.dashDir = (float)in.moveX;
+                sfx::Play(sfx::WHOOSH, 0.1f, 0.8f);
             }
         }
         break;
@@ -428,7 +455,10 @@ static void UpdateFighter(Fighter& f, const Input& in, const Fighter& foe, float
 // Camera (Bài 13)
 // -----------------------------------------------------------------------------
 static void UpdateCam(float dt) {
-    if (Has(F_CAMERA_FX) && S.phase != Phase::Select) {
+    if (S.phase == Phase::Select) {
+        S.camPos = { 0.6f, 2.1f, 6.0f };                 // cận cảnh võ sĩ đang chọn
+        S.camTarget = { 0, 1.2f, 0 };
+    } else if (Has(F_CAMERA_FX)) {
         float mid = (S.p1.pos.x + S.p2.pos.x) * 0.5f;
         float dist = std::fabs(S.p1.pos.x - S.p2.pos.x);
         Vector3 wantPos = { mid * 0.85f, 3.0f + dist * 0.08f, 8.0f + dist * 0.55f };
@@ -462,6 +492,8 @@ static void UpdateSelect() {
         if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP))   S.selDiff = std::max(0, S.selDiff - 1);
         if (IsKeyPressed(KEY_S) || IsKeyPressed(KEY_DOWN)) S.selDiff = std::min(2, S.selDiff + 1);
     }
+    if (Has(F_NEON_STAGE) && (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_E))) { S.stage = 1 - S.stage; sfx::Play(sfx::CLICK); }
+    if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_D) || IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_RIGHT)) sfx::Play(sfx::CLICK);
     S.p1.type = (CharType)S.selChar;
     S.p1.pos = { 0, 0, 0 };
     S.p1.facing = 1;
@@ -500,6 +532,9 @@ bool arena::Update(float dt) {
     // Hit-stop: logic dừng lại vài khung hình (Bài 13)
     float gdt = dt;
     if (S.hitStop > 0) { S.hitStop -= dt; gdt = 0; }
+    if (S.slowMo > 0) { S.slowMo -= dt; gdt *= 0.3f; }    // quay chậm sau cú K.O.
+    S.flash = std::max(0.0f, S.flash - dt * 2.5f);
+    S.hitLightTime -= dt;
 
     S.phaseTime += gdt;
 
@@ -568,7 +603,23 @@ bool arena::Update(float dt) {
             bool done = S.p1.roundsWon >= S.rules.roundsToWin || S.p2.roundsWon >= S.rules.roundsToWin || S.round >= 5;
             if (done) {
                 S.phase = Phase::MatchOver; S.phaseTime = 0;
-                if (S.p1.roundsWon > S.p2.roundsWon) { g_progress.wins++; g_progress.Save(); }
+                if (S.p1.roundsWon > S.p2.roundsWon) {
+                    g_progress.wins++;
+                    g_progress.Save();
+                    // Pháo giấy ăn mừng
+                    const Color cols[5] = { pal::accent, pal::accent2, pal::good, pal::bad, pal::purple };
+                    for (int i = 0; i < 260; ++i) {
+                        Particle p;
+                        p.pos = { S.p1.pos.x + (Rand01() * 2 - 1) * 6, 7.0f + Rand01() * 3, -1.5f + Rand01() * 3 };
+                        p.vel = { (Rand01() * 2 - 1) * 1.5f, -1.0f - Rand01() * 1.5f, 0 };
+                        p.maxLife = p.life = 4.0f + Rand01() * 2;
+                        p.size = 0.09f;
+                        p.color = cols[i % 5];
+                        p.confetti = true;
+                        p.spin = Rand01() * 360;
+                        S.particles.push_back(p);
+                    }
+                }
             } else {
                 S.round++;
                 StartRound();
@@ -584,186 +635,263 @@ bool arena::Update(float dt) {
 // =============================================================================
 //  VẼ
 // =============================================================================
-static Color Darken(Color c, float k = 0.55f) {
-    return Color{ (unsigned char)(c.r * k), (unsigned char)(c.g * k), (unsigned char)(c.b * k), c.a };
-}
+// =============================================================================
+//  SÂN KHẤU & ÁNH SÁNG (Bài 15)
+// =============================================================================
+static bool Neon() { return S.stage == 1; }
 
-static void Part(Vector3 c, Vector3 s, Color col) {
-    DrawCubeV(c, s, col);
-    DrawCubeWiresV(c, s, Darken(col));
-}
-
-// Tay/chân: một khối hộp xoay quanh khớp (vai/hông)
-static void Limb(Vector3 pivot, float angleDeg, float len, float w, Color c, Color endCol, bool arm) {
-    rlPushMatrix();
-    rlTranslatef(pivot.x, pivot.y, pivot.z);
-    rlRotatef(angleDeg, 0, 0, 1);
-    Part({ 0, -len / 2, 0 }, { w, len, w }, c);
-    if (arm) DrawSphereEx({ 0, -len, 0 }, w * 0.72f, 8, 8, endCol);
-    else     Part({ 0.07f, -len + 0.04f, 0 }, { w * 1.5f, 0.1f, w * 1.1f }, endCol);
-    rlPopMatrix();
-}
-
-static void DrawDummy(const Fighter& f, float time) {
-    const CharStats& cs = GetCharacterStats(CharType::Dummy);
-    Color bag = Lerp(cs.body, WHITE, f.flash * 0.7f);
-    Part({ 0, 0.06f, 0 }, { 0.9f, 0.12f, 0.9f }, Color{ 60, 60, 70, 255 });
-    float wob = std::sin(time * 22.0f) * f.flash * 14.0f;
-    rlPushMatrix();
-    rlTranslatef(0, 0.12f, 0);
-    if (f.state == FState::KO) rlRotatef(-std::min(1.0f, f.stateTime * 3) * 80.0f * (f.facing > 0 ? 1 : -1), 0, 0, 1);
-    rlRotatef(wob, 0, 0, 1);
-    DrawCylinder({ 0, 0, 0 }, 0.42f, 0.46f, 1.7f, 14, bag);
-    DrawCylinderWires({ 0, 0, 0 }, 0.42f, 0.46f, 1.7f, 14, Darken(bag));
-    DrawCylinder({ 0, 0.35f, 0 }, 0.45f, 0.45f, 0.08f, 14, cs.accent);
-    DrawCylinder({ 0, 1.3f, 0 }, 0.43f, 0.43f, 0.08f, 14, cs.accent);
-    DrawSphereEx({ -0.12f, 1.45f, 0.38f }, 0.05f, 6, 6, BLACK);
-    DrawSphereEx({ 0.12f, 1.45f, 0.38f }, 0.05f, 6, 6, BLACK);
-    rlPopMatrix();
-}
-
-void DrawFighterModel(const Fighter& f, bool animate, float time) {
-    // Bóng đổ giả dưới chân
-    float sh = 0.55f - std::min(f.pos.y, 2.0f) * 0.12f;
-    DrawCylinder({ f.pos.x, 0.012f, f.pos.z }, sh, sh, 0.01f, 16, Color{ 0, 0, 0, 90 });
-
-    rlPushMatrix();
-    rlTranslatef(f.pos.x, f.pos.y, f.pos.z);
-    if (f.type == CharType::Dummy) { DrawDummy(f, time); rlPopMatrix(); return; }
-    rlRotatef(f.facing > 0 ? 0.0f : 180.0f, 0, 1, 0);
-
-    const CharStats& cs = GetCharacterStats(f.type);
-    float fl = f.flash * 0.75f;
-    Color body = Lerp(cs.body, WHITE, fl), acc = Lerp(cs.accent, WHITE, fl), skin = Lerp(cs.skin, WHITE, fl);
-    Color pants = Lerp(Darken(cs.body, 0.6f), WHITE, fl);
-
-    // Góc khớp (độ). Góc dương = vung về phía trước.
-    float armF = 40, armB = 40, legF = 8, legB = -8, lean = 0, bob = 0;
-    float t = f.stateTime;
-    const float PI_F = 3.14159265f;
-    if (animate) {
-        switch (f.state) {
-        case FState::Idle:
-            bob = std::sin(time * 4.0f) * 0.025f;
-            armF = 45 + std::sin(time * 4.0f) * 5; armB = 35 - std::sin(time * 4.0f) * 5;
-            break;
-        case FState::Walk: {
-            float s = std::sin(f.walkPhase);
-            legF = s * 32; legB = -s * 32;
-            armF = 42 - s * 12; armB = 42 + s * 12;
-            bob = std::fabs(s) * 0.05f;
-            break;
-        }
-        case FState::Punch: {
-            float k = std::sin(Clamp01(t / PUNCH_TIME) * PI_F);
-            armF = 40 + k * 55; armB = 50; lean = -k * 8;
-            break;
-        }
-        case FState::Kick: {
-            float k = std::sin(Clamp01(t / KICK_TIME) * PI_F);
-            legF = 8 + k * 92; legB = -8 - k * 10; lean = k * 14; armF = 30; armB = 55;
-            break;
-        }
-        case FState::Block: armF = 115; armB = 105; lean = 6; break;
-        case FState::Hurt:  lean = 22 * (1 - Clamp01(t / HURT_TIME)); armF = 10; armB = 15; break;
-        case FState::KO:    lean = std::min(1.0f, t * 3) * 82; armF = 160; armB = 150; legF = 20; break;
-        case FState::Victory:
-            armF = 165; armB = 170; bob = std::fabs(std::sin(time * 6)) * 0.12f;
-            break;
-        }
+// Thiết lập "không khí" ánh sáng cho sân khấu hiện tại
+static void SetupEnvironment() {
+    gfx::Environment e;
+    float mid = (S.phase == Phase::Select) ? 0.0f : (S.p1.pos.x + S.p2.pos.x) * 0.5f;
+    e.shadowCenter = { mid, 0, 0 };
+    e.shadowSize = 20;
+    if (!Neon()) {
+        e.sunDir = { 0.3f, -1.0f, -0.45f };
+        e.sunColor = { 255, 238, 214, 255 };
+        e.sunIntensity = 1.15f;
+        e.sky = { 125, 140, 196, 255 };
+        e.ground = { 76, 54, 66, 255 };
+        e.ambient = 0.5f;
+        e.fog = { 34, 24, 52, 255 };
+        e.fogNear = 18; e.fogFar = 46;
+        e.lights[0] = { { -7, 4, 2 }, pal::accent, 1.3f, 9 };
+        e.lights[1] = { { 7, 4, 2 }, pal::accent2, 1.3f, 9 };
+        e.lights[2] = { { 0, 6, -7.5f }, pal::purple, 1.2f, 9 };
+        e.lightCount = 3;
+        e.bloom = 0.45f; e.bloomThreshold = 0.8f;
     } else {
-        // Chưa có hoạt ảnh (trước Bài 10): tư thế cứng đơ, chỉ "giật" tay/chân
-        if (f.state == FState::Punch) armF = 90;
-        if (f.state == FState::Kick) legF = 90;
-        if (f.state == FState::Block) armF = armB = 110;
-        if (f.state == FState::KO) lean = 85;
+        e.sunDir = { -0.2f, -1.0f, -0.35f };
+        e.sunColor = { 130, 150, 255, 255 };
+        e.sunIntensity = 0.4f;
+        e.sky = { 50, 46, 110, 255 };
+        e.ground = { 36, 12, 46, 255 };
+        e.ambient = 0.5f;
+        e.fog = { 8, 6, 22, 255 };
+        e.fogNear = 14; e.fogFar = 36;
+        float sw = std::sin(S.time * 0.9f) * 6.0f;
+        e.lights[0] = { { -5, 3, 1.5f }, Color{ 255, 60, 200, 255 }, 2.2f, 8 };
+        e.lights[1] = { { 5, 3, 1.5f }, Color{ 40, 220, 255, 255 }, 2.2f, 8 };
+        e.lights[2] = { { sw, 5, 0.5f }, Color{ 255, 170, 60, 255 }, 1.8f, 7 };
+        e.lights[3] = { { 0, 5, -6 }, Color{ 150, 80, 255, 255 }, 1.8f, 11 };
+        e.lightCount = 4;
+        e.bloom = 1.0f; e.bloomThreshold = 0.6f; e.saturation = 1.2f;
     }
-
-    if (f.casual && (f.state == FState::Idle || f.state == FState::Walk)) {
-        float s = (f.state == FState::Walk) ? std::sin(f.walkPhase) : 0.0f;
-        armF = 4 - s * 26; armB = 4 + s * 26;
-    }
-
-    rlTranslatef(0, bob, 0);
-    rlRotatef(lean, 0, 0, 1);
-
-    // Chân
-    Limb({ 0, 0.9f, 0.14f },  legF, 0.86f, 0.22f, pants, Darken(acc, 0.8f), false);
-    Limb({ 0, 0.9f, -0.14f }, legB, 0.86f, 0.22f, pants, Darken(acc, 0.8f), false);
-    // Thân + đai
-    Part({ 0, 1.27f, 0 }, { 0.40f, 0.74f, 0.60f }, body);
-    Part({ 0, 0.94f, 0 }, { 0.42f, 0.09f, 0.62f }, acc);
-    // Đầu
-    if (f.type == CharType::Robot) {
-        Part({ 0, 1.84f, 0 }, { 0.38f, 0.36f, 0.38f }, skin);
-        Part({ 0.19f, 1.86f, 0 }, { 0.03f, 0.08f, 0.30f }, acc);
-        DrawCylinder({ 0, 2.02f, 0 }, 0.015f, 0.015f, 0.18f, 6, DARKGRAY);
-        DrawSphereEx({ 0, 2.22f, 0 }, 0.05f, 6, 6, acc);
-    } else {
-        DrawSphereEx({ 0, 1.84f, 0 }, 0.21f, 10, 12, skin);
-        if (f.type == CharType::Dev) {
-            Part({ -0.02f, 2.0f, 0 }, { 0.38f, 0.1f, 0.42f }, Color{ 50, 34, 26, 255 });        // tóc
-            Part({ 0.2f, 1.87f, 0.08f }, { 0.03f, 0.08f, 0.11f }, Color{ 20, 20, 24, 255 });    // kính
-            Part({ 0.2f, 1.87f, -0.08f }, { 0.03f, 0.08f, 0.11f }, Color{ 20, 20, 24, 255 });
-            Part({ -0.17f, 1.62f, 0 }, { 0.10f, 0.16f, 0.50f }, Darken(body, 0.8f));            // mũ áo hoodie
-        } else {
-            DrawSphereEx({ 0.19f, 1.88f, 0.07f }, 0.025f, 5, 5, BLACK);
-            DrawSphereEx({ 0.19f, 1.88f, -0.07f }, 0.025f, 5, 5, BLACK);
-        }
-        if (f.type == CharType::Ninja) {
-            Part({ 0.02f, 1.76f, 0 }, { 0.40f, 0.13f, 0.43f }, body);                          // khăn che mặt
-            Part({ 0, 1.95f, 0 }, { 0.43f, 0.07f, 0.45f }, acc);                                // băng đô
-            Part({ -0.32f, 1.93f, 0.05f }, { 0.26f, 0.05f, 0.06f }, acc);
-        }
-        if (f.type == CharType::Samurai) {
-            Part({ 0, 2.0f, 0 }, { 0.46f, 0.13f, 0.48f }, acc);                                 // mũ giáp
-            Part({ 0.05f, 2.14f, 0 }, { 0.05f, 0.18f, 0.32f }, acc);
-            Part({ 0, 1.63f, 0.36f }, { 0.32f, 0.08f, 0.24f }, acc);                            // giáp vai
-            Part({ 0, 1.63f, -0.36f }, { 0.32f, 0.08f, 0.24f }, acc);
-        }
-    }
-    // Tay
-    Limb({ 0, 1.56f, 0.40f },  armF, 0.70f, 0.17f, body, f.type == CharType::Robot ? acc : skin, true);
-    Limb({ 0, 1.56f, -0.40f }, armB, 0.70f, 0.17f, body, f.type == CharType::Robot ? acc : skin, true);
-
-    rlPopMatrix();
+    // Ánh chớp tại điểm trúng đòn: đèn điểm sống 0.15 giây
+    if (S.hitLightTime > 0 && e.lightCount < 8)
+        e.lights[e.lightCount++] = { S.hitLightPos, Color{ 255, 200, 120, 255 }, 4.0f * (S.hitLightTime / 0.15f), 4 };
+    gfx::SetEnvironment(e);
 }
 
-static void DrawStage() {
-    // Sàn đấu
-    Part({ 0, -0.3f, 0 }, { 17.0f, 0.6f, 5.0f }, Color{ 38, 42, 58, 255 });
+static Color CrowdColor(int i, int row) {
+    return Color{ (unsigned char)(80 + (i * 37 + row * 53) % 150), (unsigned char)(70 + (i * 71 + row * 29) % 120),
+                  (unsigned char)(90 + (i * 13 + row * 97) % 140), 255 };
+}
+
+static Vector3 CrowdPos(int i, int row) {
+    float x = -11.0f + i * 0.85f + (row % 2) * 0.4f;
+    float jump = std::fabs(std::sin(S.time * (3.0f + (i % 5)) + i * 1.7f + row)) * (S.phase == Phase::RoundOver ? 0.3f : 0.12f);
+    return { x, row * 1.2f + 0.6f + jump, -4.5f - row * 1.2f };
+}
+
+// Vật thể đặc, được chiếu sáng
+static void DrawStageSolid() {
+    Color base = Neon() ? Color{ 24, 24, 36, 255 } : Color{ 52, 56, 76, 255 };
+    gfx::Box({ 0, -0.3f, 0 }, { 17.4f, 0.6f, 5.4f }, base);
     for (int x = -8; x < 8; ++x)
         for (int z = -2; z < 2; ++z) {
-            Color c = ((x + z) & 1) ? Color{ 52, 58, 80, 255 } : Color{ 46, 51, 70, 255 };
-            DrawCube({ x + 0.5f, 0.0f, z + 0.5f }, 0.98f, 0.02f, 0.98f, c);
+            bool odd = (x + z) & 1;
+            Color c = Neon() ? (odd ? Color{ 34, 32, 52, 255 } : Color{ 26, 26, 40, 255 })
+                             : (odd ? Color{ 66, 72, 98, 255 } : Color{ 56, 61, 84, 255 });
+            gfx::Box({ x + 0.5f, 0.0f, z + 0.5f }, { 0.96f, 0.02f, 0.96f }, c);
         }
-    // Viền đèn neon
-    DrawCube({ 0, 0.02f, 2.45f }, 17.0f, 0.04f, 0.08f, pal::accent);
-    DrawCube({ 0, 0.02f, -2.45f }, 17.0f, 0.04f, 0.08f, pal::accent2);
-    // Cột hai bên
+    // Cột góc và dây đài phía sau
+    Color metal = { 150, 156, 170, 255 };
+    for (int sx = -1; sx <= 1; sx += 2)
+        for (int sz = -1; sz <= 1; sz += 2) {
+            gfx::Cylinder({ sx * 8.5f, 0, sz * 2.55f }, { sx * 8.5f, 1.6f, sz * 2.55f }, 0.09f, 0.09f, metal, 10);
+            gfx::Box({ sx * 8.5f, 1.65f, sz * 2.55f }, { 0.26f, 0.12f, 0.26f }, sx < 0 ? pal::bad : pal::accent2);
+        }
+    const Color ropes[3] = { pal::bad, Color{ 235, 235, 240, 255 }, pal::accent2 };
+    for (int r = 0; r < 3; ++r) {
+        float y = 0.55f + r * 0.42f;
+        gfx::Cylinder({ -8.5f, y, -2.55f }, { 8.5f, y, -2.55f }, 0.035f, 0.035f, ropes[r], 8, false);
+        for (int sx = -1; sx <= 1; sx += 2)
+            gfx::Cylinder({ sx * 8.5f, y, -2.55f }, { sx * 8.5f, y, 2.55f }, 0.035f, 0.035f, ropes[r], 8, false);
+    }
+    // Cột trụ và loa
     for (int s = -1; s <= 1; s += 2) {
-        Part({ s * 9.0f, 2.0f, -2.0f }, { 0.6f, 4.6f, 0.6f }, Color{ 30, 34, 48, 255 });
-        DrawCube({ s * 9.0f, 2.0f, -1.68f }, 0.12f, 4.4f, 0.04f, s < 0 ? pal::accent : pal::accent2);
+        gfx::Box({ s * 10.0f, 2.3f, -3.0f }, { 0.7f, 4.6f, 0.7f }, Color{ 36, 40, 56, 255 });
+        gfx::Box({ s * 10.0f, 0.9f, -1.6f }, { 1.0f, 1.8f, 0.8f }, Color{ 24, 24, 30, 255 });
+        gfx::Cylinder({ s * 10.0f, 1.25f, -1.19f }, { s * 10.0f, 1.25f, -1.17f }, 0.32f, 0.32f, Color{ 50, 50, 60, 255 }, 16);
+        gfx::Cylinder({ s * 10.0f, 0.5f, -1.19f }, { s * 10.0f, 0.5f, -1.17f }, 0.2f, 0.2f, Color{ 50, 50, 60, 255 }, 16);
     }
-    // Khán giả (khối hộp nhún nhảy)
+    // Khán đài + khán giả
     for (int row = 0; row < 3; ++row) {
-        Part({ 0, row * 0.6f + 0.3f, -4.5f - row * 1.2f }, { 22.0f, 0.6f + row * 1.2f, 1.2f }, Color{ 28, 30, 42, 255 });
-        for (int i = 0; i < 26; ++i) {
-            float x = -11.0f + i * 0.85f + (row % 2) * 0.4f;
-            float jump = std::fabs(std::sin(S.time * (3.0f + (i % 5)) + i * 1.7f + row)) * 0.12f;
-            unsigned char r = (unsigned char)(80 + (i * 37 + row * 53) % 150);
-            unsigned char g = (unsigned char)(70 + (i * 71 + row * 29) % 120);
-            unsigned char b = (unsigned char)(90 + (i * 13 + row * 97) % 140);
-            Vector3 base = { x, row * 1.2f + 0.6f + jump, -4.5f - row * 1.2f };
-            DrawCube({ base.x, base.y + 0.3f, base.z }, 0.4f, 0.6f, 0.3f, Color{ r, g, b, 255 });
-            DrawSphereEx({ base.x, base.y + 0.78f, base.z }, 0.16f, 5, 6, Color{ 220, 185, 150, 255 });
+        gfx::Box({ 0, row * 0.6f + 0.3f, -4.5f - row * 1.2f }, { 24.0f, 0.6f + row * 1.2f, 1.2f }, Color{ 34, 36, 50, 255 });
+        for (int i = 0; i < 28; ++i) {
+            Vector3 b = CrowdPos(i, row);
+            gfx::Box({ b.x, b.y + 0.3f, b.z }, { 0.42f, 0.6f, 0.32f }, CrowdColor(i, row));
+            gfx::Sphere({ b.x, b.y + 0.78f, b.z }, 0.16f, Color{ 222, 186, 152, 255 }, 5, 7);
         }
     }
-    // Màn hình lớn phía sau
-    Part({ 0, 6.4f, -9.0f }, { 9.0f, 2.6f, 0.3f }, Color{ 20, 22, 32, 255 });
-    DrawCube({ 0, 6.4f, -8.82f }, 8.6f, 2.2f, 0.02f, Color{ 40, 26, 60, 255 });
+    // Giàn đèn phía trên
+    gfx::Box({ 0, 6.6f, 0.2f }, { 20.0f, 0.25f, 0.25f }, Color{ 70, 74, 86, 255 });
+    gfx::Box({ 0, 6.6f, -0.6f }, { 20.0f, 0.25f, 0.25f }, Color{ 70, 74, 86, 255 });
+    for (int i = 0; i < 4; ++i) {
+        float x = -5.4f + i * 3.6f;
+        gfx::Cylinder({ x, 6.45f, -0.2f }, { x, 6.05f, -0.2f }, 0.18f, 0.24f, Color{ 30, 30, 36, 255 }, 12);
+    }
+    // Khung màn hình LED
+    gfx::Box({ 0, 5.3f, -9.0f }, { 10.0f, 3.2f, 0.3f }, Color{ 22, 24, 32, 255 });
+
+    // Pháo giấy
+    for (const auto& p : S.particles) {
+        if (!p.confetti) continue;
+        rlPushMatrix();
+        rlTranslatef(p.pos.x, p.pos.y, p.pos.z);
+        rlRotatef(p.spin, 0.3f, 1, 0.5f);
+        gfx::Box({ 0, 0, 0 }, { p.size, p.size * 0.6f, 0.01f }, p.color);
+        rlPopMatrix();
+    }
 }
 
+// Quad có texture (dùng cho màn hình LED)
+static void TexturedQuad(Texture2D tex, Vector3 c, float w, float h) {
+    rlSetTexture(tex.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(255, 255, 255, 255);
+    rlNormal3f(0, 0, 1);
+    rlTexCoord2f(0, 0); rlVertex3f(c.x - w / 2, c.y - h / 2, c.z);
+    rlTexCoord2f(1, 0); rlVertex3f(c.x + w / 2, c.y - h / 2, c.z);
+    rlTexCoord2f(1, 1); rlVertex3f(c.x + w / 2, c.y + h / 2, c.z);
+    rlTexCoord2f(0, 1); rlVertex3f(c.x - w / 2, c.y + h / 2, c.z);
+    rlEnd();
+    rlSetTexture(0);
+}
+
+// Vật phát sáng: vẽ không qua shader ánh sáng, cộng màu (additive)
+static void DrawStageGlow() {
+    if (S.screenOk) TexturedQuad(S.screen.texture, { 0, 5.3f, -8.84f }, 9.4f, 2.7f);
+
+    gfx::BeginGlow();
+    Color stripA = Neon() ? Color{ 255, 60, 200, 255 } : pal::accent;
+    Color stripB = Neon() ? Color{ 40, 220, 255, 255 } : pal::accent2;
+    DrawCube({ 0, 0.03f, 2.72f }, 17.4f, 0.05f, 0.06f, stripA);
+    DrawCube({ 0, -0.3f, 2.71f }, 17.4f, 0.04f, 0.02f, Fade(stripA, 0.6f));
+    DrawCube({ 0, 0.03f, -2.72f }, 17.4f, 0.05f, 0.06f, stripB);
+    for (int s = -1; s <= 1; s += 2)
+        DrawCube({ s * 10.0f, 2.3f, -2.64f }, 0.14f, 4.4f, 0.02f, s < 0 ? stripA : stripB);
+
+    // Đèn sân khấu + chùm sáng
+    for (int i = 0; i < 4; ++i) {
+        float x = -5.4f + i * 3.6f;
+        float swing = Neon() ? std::sin(S.time * 0.8f + i * 1.3f) * 2.5f : 0.0f;
+        Color c = (i % 2 == 0) ? stripA : stripB;
+        if (!Neon()) c = Color{ 255, 236, 200, 255 };
+        DrawSphere({ x, 6.02f, -0.2f }, 0.17f, c);
+        DrawCylinderEx({ x, 6.0f, -0.2f }, { x + swing, 0.0f, 0.4f }, 0.15f, 1.5f, 16, Fade(c, Neon() ? 0.10f : 0.05f));
+    }
+    // Gậy phát sáng của khán giả
+    for (int row = 0; row < 3; ++row)
+        for (int i = 0; i < 28; i += 2) {
+            Vector3 b = CrowdPos(i, row);
+            float wave = std::sin(S.time * 4 + i * 0.6f + row) * 0.25f;
+            Color c = ((i + row) % 3 == 0) ? stripA : ((i + row) % 3 == 1 ? stripB : pal::accent);
+            DrawCube({ b.x + 0.22f + wave * 0.3f, b.y + 1.1f, b.z + 0.1f }, 0.05f, 0.32f, 0.05f, c);
+        }
+    // Tia lửa
+    for (const auto& p : S.particles) {
+        if (p.confetti) continue;
+        float k = p.life / p.maxLife;
+        float sz = p.size * k + 0.012f;
+        DrawCube(p.pos, sz, sz, sz, Fade2(p.color, 0.5f + k * 0.5f));
+    }
+    // Sao trên trời đêm (chỉ sân Neon)
+    gfx::EndGlow();
+}
+
+static void DrawCasters() {
+    bool anim = Has(F_ANIM_STATES);
+    DrawFighterModel(S.p1, anim, S.time);
+    if (S.phase != Phase::Select) DrawFighterModel(S.p2, anim, S.time);
+    for (int s = -1; s <= 1; s += 2)
+        for (int sz = -1; sz <= 1; sz += 2)
+            gfx::Cylinder({ s * 8.5f, 0, sz * 2.55f }, { s * 8.5f, 1.6f, sz * 2.55f }, 0.09f, 0.09f, WHITE, 8);
+}
+
+// Màn hình LED: vẽ chữ vào render texture
+static void RenderLedScreen() {
+    if (!S.screenOk) return;
+    BeginTextureMode(S.screen);
+    Color top = Neon() ? Color{ 40, 6, 60, 255 } : Color{ 30, 24, 70, 255 };
+    Color bot = Neon() ? Color{ 6, 30, 60, 255 } : Color{ 70, 20, 60, 255 };
+    DrawRectangleGradientV(0, 0, 640, 184, top, bot);
+    for (int i = 0; i < 24; ++i) {                    // cột nhạc nhảy múa
+        float h = 20 + std::fabs(std::sin(S.time * 3 + i * 0.7f)) * 50;
+        DrawRectangle(i * 27 + 4, (int)(184 - h), 20, (int)h, Fade(i % 2 ? pal::accent2 : pal::purple, 0.35f));
+    }
+    std::string title = "CODE VÕ ĐÀI";
+    ui::TextCentered(title, 320, 18, 64, pal::accent, FS_BOLD);
+    std::string sub;
+    if (S.phase == Phase::Select) sub = Neon() ? "SÂN KHẤU NEON" : "CHỌN VÕ SĨ";
+    else sub = std::string(GetCharacterStats(S.p1.type).name) + "  VS  " + GetCharacterStats(S.p2.type).name;
+    ui::TextCentered(sub, 320, 100, 34, WHITE, FS_BOLD);
+    if (S.phase != Phase::Select && S.rules.roundsToWin > 1)
+        ui::TextCentered(TextFormat("HIỆP %d", S.round), 320, 142, 24, pal::accent2, FS_BOLD);
+    for (int y = 0; y < 184; y += 3) DrawRectangle(0, y, 640, 1, Color{ 0, 0, 0, 60 });   // vạch quét
+    EndTextureMode();
+}
+
+void arena::Init() {
+    S.screen = LoadRenderTexture(640, 184);
+    S.screenOk = S.screen.id != 0;
+    if (S.screenOk) SetTextureFilter(S.screen.texture, TEXTURE_FILTER_BILINEAR);
+}
+
+void arena::Shutdown() {
+    if (S.screenOk) UnloadRenderTexture(S.screen);
+}
+
+void arena::RenderOffscreen() {
+    SetupEnvironment();
+    RenderLedScreen();
+    gfx::RenderShadowMap(DrawCasters);
+}
+
+void arena::Draw3D() {
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    if (Neon()) {
+        DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{ 4, 4, 16, 255 }, Color{ 34, 8, 44, 255 });
+        for (int i = 0; i < 90; ++i) {           // sao
+            float x = std::fmod(i * 137.5f, W), y = std::fmod(i * 71.3f, H * 0.45f);
+            float tw = 0.5f + 0.5f * std::sin(S.time * 2 + i);
+            DrawCircle((int)x, (int)y, 1.2f + (i % 3) * 0.5f, Fade(WHITE, 0.3f + 0.5f * tw));
+        }
+    } else {
+        DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{ 22, 20, 46, 255 }, Color{ 72, 38, 82, 255 });
+    }
+
+    BeginMode3D(S.cam);
+    gfx::BeginLit(S.cam);
+    DrawStageSolid();
+    bool anim = Has(F_ANIM_STATES);
+    DrawFighterModel(S.p1, anim, S.time);
+    if (S.phase != Phase::Select) DrawFighterModel(S.p2, anim, S.time);
+    gfx::EndLit();
+    DrawStageGlow();
+    if (S.showHitbox && S.phase != Phase::Select) {
+        for (const Fighter* f : { &S.p1, &S.p2 }) {
+            DrawBoundingBox(HurtBox(*f), GREEN);
+            if (f->state == FState::Punch || f->state == FState::Kick)
+                DrawBoundingBox(AttackBox(*f), AttackActive(*f) ? RED : Color{ 120, 40, 40, 255 });
+        }
+    }
+    EndMode3D();
+
+    gfx::SetFlash(S.flash);
+    gfx::SetAberration(S.slowMo > 0 ? 0.8f : S.shake * 0.5f);
+}
 // ---- HUD --------------------------------------------------------------------
 static void DrawHpBar(const Fighter& f, float trail, bool left, float s) {
     float W = (float)GetScreenWidth();
@@ -808,6 +936,7 @@ static void DrawBigText(const std::string& t, float size, Color c, float yFrac) 
 static void DrawSelectOverlay() {
     float s = ui::S();
     float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    DrawRectangleGradientV(0, 0, (int)W, (int)(140 * s), Color{ 8, 8, 16, 230 }, Color{ 8, 8, 16, 0 });
     ui::TextCentered("CHỌN VÕ SĨ", W / 2, 26 * s, 40 * s, pal::accent, FS_BOLD);
     ui::TextCentered("A/D hoặc ← → để chọn,  Enter để vào trận", W / 2, 76 * s, 18 * s, pal::dim);
 
@@ -831,6 +960,13 @@ static void DrawSelectOverlay() {
             ui::Text(labels[k], r.x + 14 * s, yy, 15 * s, pal::text);
             ui::Bar({ r.x + 100 * s, yy + 4 * s, cw - 120 * s, 10 * s }, vals[k], sel ? pal::accent : pal::accent2, pal::panel2);
         }
+    }
+    // Chọn sân khấu (Bài 15)
+    {
+        std::string st = Has(F_NEON_STAGE)
+            ? std::string("Sân khấu: ") + (S.stage == 1 ? "◀ NEON BAN ĐÊM ▶" : "◀ SÂN ĐẤU ▶") + "   (Q/E để đổi)"
+            : std::string("Học Bài 15 (Shader) để mở khóa sân khấu Neon");
+        ui::TextCentered(st, W / 2, 104 * s, 18 * s, Has(F_NEON_STAGE) ? pal::accent2 : pal::dim, FS_BOLD);
     }
     if (Has(F_ROUNDS)) {
         const char* diffs[3] = { "Dễ", "Thường", "Khó" };
@@ -900,28 +1036,10 @@ static std::string ControlsLine() {
     return c;
 }
 
-void arena::Draw() {
+void arena::DrawHUD() {
     float s = ui::S();
     float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
-    DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{ 16, 16, 34, 255 }, Color{ 58, 30, 66, 255 });
-
-    BeginMode3D(S.cam);
-    DrawStage();
-    bool anim = Has(F_ANIM_STATES);
-    DrawFighterModel(S.p1, anim, S.time);
-    if (S.phase != Phase::Select) DrawFighterModel(S.p2, anim, S.time);
-    for (const auto& p : S.particles) {
-        float k = p.life / p.maxLife;
-        DrawCube(p.pos, p.size * k + 0.01f, p.size * k + 0.01f, p.size * k + 0.01f, Fade2(p.color, 0.4f + k * 0.6f));
-    }
-    if (S.showHitbox && S.phase != Phase::Select) {
-        for (const Fighter* f : { &S.p1, &S.p2 }) {
-            DrawBoundingBox(HurtBox(*f), GREEN);
-            if (f->state == FState::Punch || f->state == FState::Kick)
-                DrawBoundingBox(AttackBox(*f), AttackActive(*f) ? RED : Color{ 120, 40, 40, 255 });
-        }
-    }
-    EndMode3D();
+    if (!gfx::PostEnabled() && S.flash > 0) DrawRectangle(0, 0, (int)W, (int)H, Fade(WHITE, S.flash));
 
     // Số sát thương bay lên
     for (const auto& p : S.popups) {

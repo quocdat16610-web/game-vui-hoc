@@ -1,4 +1,5 @@
 #include "LessonScreen.h"
+#include "Audio.h"
 #include "Common.h"
 #include "Lessons.h"
 #include "UI.h"
@@ -46,6 +47,7 @@ static void Finish() {
     if (S.lesson == g_progress.completed) {
         g_progress.completed++;
         S.newlyUnlocked = true;
+        sfx::Play(sfx::UNLOCK, 0);
     }
     g_progress.Save();
     S.finished = true;
@@ -87,8 +89,8 @@ static void Pick(int orderPos) {
     if (qs.solved || qs.picked >= 0) return;
     if (orderPos < 0 || orderPos >= (int)qs.order.size()) return;
     qs.picked = qs.order[orderPos];
-    if (qs.picked == Cur().quiz[QuizIndex(S.step)].correct) qs.solved = true;
-    else qs.missed = true;
+    if (qs.picked == Cur().quiz[QuizIndex(S.step)].correct) { qs.solved = true; sfx::Play(sfx::CORRECT, 0); }
+    else { qs.missed = true; sfx::Play(sfx::WRONG, 0); }
 }
 
 static void CloseScreen() {

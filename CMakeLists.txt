@@ -34,6 +34,9 @@ add_executable(CodeVoDai
     src/Office.cpp
     src/LessonScreen.cpp
     src/Arena.cpp
+    src/FighterModel.cpp
+    src/Gfx.cpp
+    src/Audio.cpp
 )
 target_link_libraries(CodeVoDai PRIVATE raylib)
 

@@ -981,6 +981,155 @@ void HealthSystem(std::vector<Health>& hs) {
         "src/Arena.cpp: enum class Phase và struct MatchRules."
     });
 
+    // -------------------------------------------------------------------------
+    // BÀI 15 — SHADER & ÁNH SÁNG
+    // -------------------------------------------------------------------------
+    L.push_back({
+        "Nâng cao", "Shader & ánh sáng (GLSL)", "lessons/15_shader_anh_sang.cpp",
+        "Game chạy tốt rồi nhưng mấy khối hộp nhìn vẫn phẳng lì như giấy. Bí mật của đồ họa đẹp nằm trong SHADER: "
+        "những chương trình nhỏ chạy trên card đồ họa (GPU), tính màu cho từng điểm ảnh. Mở thư mục assets/shaders "
+        "ra xem: ánh sáng, bóng đổ và bloom của chính game này đều nằm ở đó!",
+        {
+            { "Shader là gì?",
+              "GPU vẽ mọi thứ bằng tam giác. Với mỗi tam giác, GPU chạy hai chương trình do bạn viết bằng ngôn ngữ GLSL:\n"
+              "- Vertex shader: chạy cho từng ĐỈNH, tính vị trí trên màn hình\n"
+              "- Fragment shader: chạy cho từng ĐIỂM ẢNH, tính màu cuối cùng\n"
+              "Hàng triệu điểm ảnh được tính SONG SONG, nên GPU nhanh hơn CPU rất nhiều cho việc này.\n"
+              "> Trong raylib: LoadShader() nạp shader, SetShaderValue() gửi dữ liệu (uniform), BeginShaderMode() bật shader khi vẽ.",
+              R"CODE(// C++: nạp shader và gửi hướng mặt trời lên GPU
+Shader lit = LoadShader("lit.vs", "lit.fs");
+int locSun = GetShaderLocation(lit, "sunDir");
+Vector3 sun = {0.4f, -1.0f, -0.3f};
+SetShaderValue(lit, locSun, &sun, SHADER_UNIFORM_VEC3);
+
+BeginMode3D(cam);
+    BeginShaderMode(lit);   // mọi thứ vẽ sau đây đi qua shader
+        DrawCube({0, 1, 0}, 1, 2, 1, RED);
+    EndShaderMode();
+EndMode3D();)CODE" },
+            { "Chiếu sáng: Lambert & Blinn-Phong",
+              "Mô hình ánh sáng kinh điển gồm 3 phần:\n"
+              "- Môi trường (ambient): ánh sáng dội khắp nơi, để chỗ tối không đen kịt\n"
+              "- Khuếch tán (Lambert): bề mặt càng quay về phía nguồn sáng càng sáng = max(dot(N, L), 0)\n"
+              "- Bóng loáng (specular): đốm sáng phản chiếu, phụ thuộc vị trí mắt nhìn\n"
+              "N là pháp tuyến (hướng bề mặt quay ra), L là hướng tới nguồn sáng. Chính là tích vô hướng Dot của Bài 9!",
+              R"CODE(// GLSL (fragment shader) — rút gọn từ assets/shaders/lit.fs
+uniform vec3 sunDir;      // gửi từ C++
+uniform vec3 sunColor;
+in vec3 fragNormal;       // nhận từ vertex shader
+out vec4 finalColor;
+
+void main() {
+    vec3 N = normalize(fragNormal);
+    vec3 L = -sunDir;
+    float diffuse = max(dot(N, L), 0.0);          // Lambert
+    vec3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 48.0); // Blinn-Phong
+    vec3 color = albedo * (ambient + sunColor * diffuse)
+               + sunColor * spec;
+    finalColor = vec4(color, 1.0);
+})CODE" },
+            { "Bóng đổ & hậu kỳ",
+              "Bóng đổ (shadow mapping) gồm 2 lượt vẽ:\n"
+              "- Lượt 1: vẽ cảnh từ góc nhìn MẶT TRỜI, chỉ lưu độ sâu vào một texture (shadow map)\n"
+              "- Lượt 2: khi vẽ bình thường, mỗi điểm ảnh hỏi shadow map: có vật nào chắn giữa mình và mặt trời không?\n"
+              "Hậu kỳ (post-processing): vẽ cả cảnh vào một texture, rồi chạy shader trên toàn màn hình:\n"
+              "- Bloom: lọc điểm sáng, làm mờ, cộng lại → đèn neon tỏa sáng\n"
+              "- FXAA khử răng cưa, vignette tối góc, chỉnh độ bão hòa màu\n"
+              "> Nhấn F2 trong game để đổi chất lượng đồ họa (Thấp / Trung bình / Cao) và so sánh.",
+              R"CODE(// Kiểm tra bóng đổ trong fragment shader
+vec4 p = lightVP * vec4(fragPosition, 1.0); // sang không gian ánh sáng
+p.xyz = p.xyz / p.w * 0.5 + 0.5;            // về khoảng [0, 1]
+float gan = texture(shadowMap, p.xy).r;     // độ sâu vật gần mặt trời nhất
+float trongBong = (p.z - bias > gan) ? 1.0 : 0.0;
+
+// C++: vẽ cảnh vào texture rồi xử lý hậu kỳ
+BeginTextureMode(sceneRT);  DrawWorld();  EndTextureMode();
+BeginShaderMode(postShader);
+    DrawTextureRec(sceneRT.texture, src, {0, 0}, WHITE);
+EndShaderMode();)CODE" },
+        },
+        {
+            { "Fragment shader chạy bao nhiêu lần?",
+              { "Một lần cho cả khung hình", "Một lần cho mỗi điểm ảnh của vật được vẽ", "Một lần cho mỗi đỉnh", "Một lần khi khởi động game" }, 1,
+              "Vertex shader chạy theo đỉnh, fragment shader chạy theo điểm ảnh, song song trên GPU." },
+            { "Trong chiếu sáng Lambert, độ sáng bằng gì?",
+              { "max(dot(N, L), 0)", "N + L", "length(N)", "Luôn bằng 1" }, 0,
+              "Bề mặt quay thẳng về nguồn sáng (N trùng L) sáng nhất, quay ngang thì tối." },
+            { "Shadow map lưu thông tin gì?",
+              { "Độ sâu của cảnh nhìn từ nguồn sáng", "Màu của bầu trời", "Âm thanh", "Vị trí chuột" }, 0,
+              "So sánh độ sâu điểm đang vẽ với độ sâu trong shadow map để biết có bị che hay không." },
+        },
+        "Sân khấu Neon ban đêm",
+        "Ở màn chọn võ sĩ, nhấn Q/E để đổi sang sân khấu Neon: trời đêm, đèn màu và hiệu ứng bloom rực rỡ.",
+        "Mở assets/shaders/lit.fs, đổi số 48.0 trong hàm pow thành 8.0 rồi chạy lại game: bề mặt bóng loáng hơn hay mờ hơn? Thử đổi màu sương mù.",
+        "assets/shaders/*.fs và src/Gfx.cpp (BeginLit, RenderShadowMap, EndScene)."
+    });
+
+    // -------------------------------------------------------------------------
+    // BÀI 16 — ÂM THANH
+    // -------------------------------------------------------------------------
+    L.push_back({
+        "Nâng cao", "Âm thanh trong game", "lessons/16_am_thanh.cpp",
+        "Một cú đấm không có tiếng \"bốp\" thì như đánh vào không khí. Âm thanh chiếm một nửa cảm giác của game! "
+        "Điều thú vị: mọi tiếng động trong Code Võ Đài đều được TẠO BẰNG CODE, không có file .wav nào cả.",
+        {
+            { "Âm thanh số & raylib",
+              "Âm thanh số là một dãy MẪU (sample): độ lệch của màng loa, đo hàng chục nghìn lần mỗi giây.\n"
+              "- Tần số lấy mẫu (sample rate): 22050 hoặc 44100 mẫu/giây\n"
+              "- Sound: tải hết vào RAM, dùng cho tiếng ngắn (đấm, nhảy)\n"
+              "- Music: đọc dần từ file (stream), dùng cho nhạc nền dài\n"
+              "> Mẹo game feel: mỗi lần phát, đổi cao độ ngẫu nhiên ±8% để tiếng lặp lại không nhàm tai.",
+              R"CODE(InitAudioDevice();                    // mở loa
+Sound dam = LoadSound("punch.wav");
+Music nhac = LoadMusicStream("theme.ogg");
+PlayMusicStream(nhac);
+
+while (!WindowShouldClose()) {
+    UpdateMusicStream(nhac);          // nạp tiếp dữ liệu nhạc
+    if (IsKeyPressed(KEY_J)) {
+        SetSoundPitch(dam, 0.92f + GetRandomValue(0, 16) / 100.0f);
+        PlaySound(dam);
+    }
+}
+CloseAudioDevice();)CODE" },
+            { "Tổng hợp âm thanh bằng toán",
+              "Mọi âm thanh đều ghép từ vài dạng sóng cơ bản:\n"
+              "- Sóng sin: tiếng trong, êm (tiếng \"bụp\" khi tần số trượt từ cao xuống thấp)\n"
+              "- Sóng vuông: tiếng 8-bit kiểu game cổ điển\n"
+              "- Nhiễu trắng: tiếng gió, tiếng va chạm, hi-hat\n"
+              "Nhân với ĐƯỜNG BAO (envelope) exp(-t * k) để tiếng tắt dần.",
+              R"CODE(const int RATE = 22050;
+std::vector<short> mau(RATE / 5);          // 0.2 giây
+float pha = 0;
+for (size_t i = 0; i < mau.size(); i++) {
+    float t = (float)i / RATE;
+    float f = 70 + 110 * expf(-t * 18);       // tần số trượt xuống
+    pha += f / RATE;
+    float v = sinf(2 * PI * pha) * expf(-t * 22)   // "thump"
+            + nhieu() * expf(-t * 40) * 0.6f;     // "bốp"
+    mau[i] = (short)(tanhf(v) * 32000);
+}
+Wave w = { (unsigned)mau.size(), RATE, 16, 1, mau.data() };
+Sound dam = LoadSoundFromWave(w);)CODE" },
+        },
+        {
+            { "Nên dùng Sound hay Music cho nhạc nền dài 3 phút?",
+              { "Sound", "Music (stream)", "Wave", "Không phát được" }, 1,
+              "Music đọc dần từng đoạn, không phải nạp cả 3 phút vào RAM." },
+            { "Vì sao nên đổi cao độ ngẫu nhiên mỗi lần phát tiếng đấm?",
+              { "Để tiếng lặp lại tự nhiên, không nhàm tai", "Để tiết kiệm RAM", "Vì raylib bắt buộc", "Để âm thanh to hơn" }, 0,
+              "Não người rất nhanh nhận ra một tiếng y hệt lặp lại. Biến thiên nhỏ làm game sống động hơn." },
+            { "Nhân tín hiệu với exp(-t * k) để làm gì?",
+              { "Tạo đường bao: âm thanh tắt dần theo thời gian", "Tăng tần số", "Đổi sang stereo", "Nén file" }, 0,
+              "k càng lớn, tiếng tắt càng nhanh: tiếng đấm thì k lớn, tiếng chuông thì k nhỏ." },
+        },
+        "Nhạc nền chiptune trong võ đài",
+        "Vào võ đài sẽ nghe nhạc nền 8-bit tự tổng hợp. Nhấn M để bật/tắt âm thanh.",
+        "Chạy lessons/16_am_thanh.cpp, thêm phím 6 phát một tiếng \"laser\": sóng vuông trượt tần số từ 1500Hz xuống 200Hz trong 0.3 giây.",
+        "src/Audio.cpp: BuildSounds() và BuildMusic()."
+    });
+
     return L;
 }
 

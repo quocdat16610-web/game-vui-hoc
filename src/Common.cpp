@@ -13,6 +13,7 @@ void Progress::Load() {
         if (key == "completed") in >> completed;
         else if (key == "wins") in >> wins;
         else if (key == "intro") in >> introSeen;
+        else if (key == "gfx") in >> gfxQuality;
         else if (key == "stars") for (int& s : stars) in >> s;
     }
     if (completed < 0) completed = 0;
@@ -24,6 +25,7 @@ void Progress::Save() const {
     out << "completed " << completed << "\n";
     out << "wins " << wins << "\n";
     out << "intro " << introSeen << "\n";
+    out << "gfx " << gfxQuality << "\n";
     out << "stars";
     for (int s : stars) out << " " << s;
     out << "\n";

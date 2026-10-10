@@ -4,10 +4,12 @@
 
 Bạn vào vai **Minh**, một dev indie đang viết một **game đối kháng 3D** bằng C++. Trong văn phòng 3D của Minh:
 
-- 💻 **Máy tính**: học 14 bài từ cơ bản đến nâng cao (lý thuyết, code mẫu tô màu, câu hỏi trắc nghiệm).
+- 💻 **Máy tính**: học 16 bài từ cơ bản đến nâng cao (lý thuyết, code mẫu tô màu, câu hỏi trắc nghiệm).
 - 🥊 **Võ đài**: chơi thử game đối kháng mà Minh đang làm. **Mỗi bài học xong sẽ mở khóa đúng một tính năng** của game: học "hàm" thì có đòn đấm, học "AABB" thì có hitbox, học "AI" thì bao cát biến thành đối thủ biết đánh trả...
 - 📚 **Kệ sách**: xem lộ trình dự án.
 - ☕ **Máy cà phê**: nhận mẹo lập trình C++.
+
+**Đồ họa**: ánh sáng bằng shader GLSL (Lambert + Blinn-Phong + đèn điểm), bóng đổ thời gian thực (shadow map), hậu kỳ bloom / FXAA / vignette, slow-motion và tách màu khi K.O., pháo giấy, màn hình LED, sân khấu Neon ban đêm. **Âm thanh**: mọi tiếng đấm, đá, đỡ và nhạc nền chiptune đều được tổng hợp bằng code, không dùng file âm thanh nào.
 
 Mọi khái niệm trong bài học đều có **file ví dụ chạy được** trong thư mục [`lessons/`](lessons) và đều **được dùng thật** trong mã nguồn game ở [`src/`](src). Học xong, bạn đọc được toàn bộ code của chính game mình vừa chơi.
 
@@ -32,13 +34,14 @@ Mỗi lần push code, GitHub Actions cũng build lại bản Windows bằng Vis
 | Văn phòng | `W A S D` / phím mũi tên: đi lại · `E`: tương tác |
 | Máy tính (bài học) | `→` / `Enter`: tiếp · `←`: quay lại · `1-4`: chọn đáp án · `R`: thử lại · con lăn chuột: cuộn · `Esc`: thoát |
 | Võ đài | `A D`: đi · `W`/`Space`: nhảy · `J`: đấm · `K`: đá · `L` (giữ): đỡ · `Shift`: lướt · `H`: xem hitbox · `P`: tạm dừng · `Esc`: về văn phòng |
-| Mọi lúc | `F11`: toàn màn hình |
+| Màn chọn võ sĩ | `A D`: chọn · `W S`: độ khó · `Q E`: đổi sân khấu (sau Bài 15) · `Enter`: vào trận |
+| Mọi lúc | `F2`: chất lượng đồ họa (Thấp / Trung bình / Cao) · `M`: bật/tắt âm thanh · `F11`: toàn màn hình |
 
 Phím chỉ hoạt động khi bạn đã học bài tương ứng. Bấm phím của tính năng chưa học, game sẽ nhắc bạn cần học bài nào.
 
 Dành cho giáo viên / muốn xem trước: trong văn phòng nhấn `F10` để mở khóa toàn bộ. Có thể chạy kèm tham số: `CodeVoDai.exe --unlock-all`, `--reset` (xóa tiến độ), `--lessons=5` (coi như đã học 5 bài).
 
-## 3. Lộ trình 14 bài
+## 3. Lộ trình 16 bài
 
 | # | Cấp độ | Bài học | Mở khóa trong game đối kháng | File ví dụ |
 |---|---|---|---|---|
@@ -56,8 +59,12 @@ Dành cho giáo viên / muốn xem trước: trong văn phòng nhấn `F10` đ�
 | 12 | Nâng cao | AI đối thủ | Đối thủ biết đánh trả | [`12_ai_doi_thu.cpp`](lessons/12_ai_doi_thu.cpp) |
 | 13 | Nâng cao | raylib: camera 3D & game feel | Camera động, rung, hit-stop | [`13_camera_raylib.cpp`](lessons/13_camera_raylib.cpp) |
 | 14 | Nâng cao | Kiến trúc game & tối ưu (Scene, ECS) | Hiệp đấu 2/3, đồng hồ, độ khó | [`14_kien_truc.cpp`](lessons/14_kien_truc.cpp) |
+| 15 | Nâng cao | Shader & ánh sáng (GLSL), bóng đổ, hậu kỳ | Sân khấu Neon ban đêm | [`15_shader_anh_sang.cpp`](lessons/15_shader_anh_sang.cpp) |
+| 16 | Nâng cao | Âm thanh: tổng hợp âm thanh bằng code | Nhạc nền chiptune | [`16_am_thanh.cpp`](lessons/16_am_thanh.cpp) |
 
 Mỗi bài có phần **bài tập tự làm**: sửa file ví dụ để thêm tính năng mới.
+
+Máy yếu hoặc card đồ họa cũ: nhấn `F2` để giảm chất lượng đồ họa (lựa chọn được lưu lại). Game cần card hỗ trợ OpenGL 3.3.
 
 ## 4. Tự biên dịch (khuyến khích, vì bạn đang học code!)
 
@@ -93,7 +100,7 @@ Build file `.exe` cho Windows từ Linux: `cmake -S . -B build-win -DCMAKE_TOOLC
 
 ### Chạy nhanh một bài học console (không cần CMake)
 
-Bài 1 đến 12 và bài 14 chỉ dùng thư viện chuẩn C++:
+Bài 1 đến 12 và bài 14 chỉ dùng thư viện chuẩn C++ (bài 13, 15, 16 cần raylib nên hãy build bằng CMake):
 
 ```bash
 g++ -std=c++17 lessons/01_bien_va_kieu.cpp -o bai01
@@ -108,7 +115,10 @@ Sau khi học xong, hãy đọc `src/` theo thứ tự này:
 |---|---|---|
 | [`src/main.cpp`](src/main.cpp) | Game loop chính, chuyển màn hình | 2, 8, 14 |
 | [`src/Common.h`](src/Common.h) / [`.cpp`](src/Common.cpp) | Danh sách tính năng, lưu/đọc tiến độ ra file | 1, 4 |
-| [`src/Arena.h`](src/Arena.h) / [`.cpp`](src/Arena.cpp) | **Game đối kháng**: Fighter, FSM, vật lý, hitbox, AI, camera, hạt | 3 → 14 |
+| [`src/Arena.h`](src/Arena.h) / [`.cpp`](src/Arena.cpp) | **Game đối kháng**: Fighter, FSM, vật lý, hitbox, AI, camera, hạt, sân khấu | 3 → 15 |
+| [`src/FighterModel.cpp`](src/FighterModel.cpp) | Dựng võ sĩ từ khối hình, hoạt ảnh khớp tay/chân | 9, 10 |
+| [`src/Gfx.cpp`](src/Gfx.cpp) + [`assets/shaders/`](assets/shaders) | Shader ánh sáng, bóng đổ, bloom, FXAA | 15 |
+| [`src/Audio.cpp`](src/Audio.cpp) | Tổng hợp tiếng đấm/đá/đỡ và nhạc nền bằng toán | 16 |
 | [`src/Office.cpp`](src/Office.cpp) | Văn phòng 3D, di chuyển, va chạm với đồ vật, render texture | 9, 11, 13 |
 | [`src/LessonScreen.cpp`](src/LessonScreen.cpp) | Màn hình học, quiz | 2, 7 |
 | [`src/Lessons.cpp`](src/Lessons.cpp) | Toàn bộ nội dung bài học (dạng dữ liệu) | 14 |
@@ -121,8 +131,9 @@ Trong `Arena.cpp`, mỗi dòng `if (Has(F_...))` là một "công tắc" tính n
 ```
 CMakeLists.txt        cấu hình build (tự tải raylib)
 src/                  mã nguồn game
-lessons/              14 file ví dụ cho 14 bài học
+lessons/              16 file ví dụ cho 16 bài học
 assets/fonts/         font hỗ trợ tiếng Việt (DejaVu Sans, JetBrains Mono)
+assets/shaders/       shader GLSL: ánh sáng, bóng đổ, hậu kỳ (sửa thử được!)
 cmake/                toolchain build .exe Windows từ Linux
 release/              bản Windows dựng sẵn
 .github/workflows/    CI: build Windows (Visual Studio) + Linux

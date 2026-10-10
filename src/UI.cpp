@@ -17,7 +17,7 @@ static std::vector<int> VietnameseCodepoints() {
     for (int c = 0x300;  c <= 0x323;  ++c) cps.push_back(c);   // dấu tổ hợp
     for (int c = 0x1EA0; c <= 0x1EF9; ++c) cps.push_back(c);   // ạ ả ấ ầ ... ỹ
     const int extra[] = { 0x2022, 0x2026, 0x2190, 0x2191, 0x2192, 0x2193, 0x2605, 0x2606,
-                          0x2713, 0x2717, 0x25B6, 0x25CF, 0x25CB, 0x2014, 0x2013, 0x201C, 0x201D, 0x2264, 0x2265, 0x2260, 0x00D7 };
+                          0x2713, 0x2717, 0x25B6, 0x25C0, 0x25CF, 0x25CB, 0x2014, 0x2013, 0x201C, 0x201D, 0x2264, 0x2265, 0x2260, 0x00D7 };
     for (int c : extra) cps.push_back(c);
     return cps;
 }
@@ -149,7 +149,8 @@ static const std::unordered_set<std::string>& Keywords() {
         "while", "do", "return", "class", "struct", "public", "private", "protected", "virtual", "override",
         "new", "delete", "nullptr", "true", "false", "namespace", "using", "switch", "case", "break",
         "continue", "enum", "static", "template", "typename", "this", "unsigned", "default", "operator",
-        "sizeof", "inline", "final", "explicit", "std" };
+        "sizeof", "inline", "final", "explicit", "std",
+        "uniform", "in", "out", "vec2", "vec3", "vec4", "mat4", "sampler2D" };
     return kw;
 }
 

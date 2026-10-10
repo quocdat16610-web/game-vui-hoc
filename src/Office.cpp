@@ -1,12 +1,14 @@
 #include "Office.h"
 #include "Arena.h"
 #include "Common.h"
+#include "Gfx.h"
 #include "Lessons.h"
 #include "UI.h"
 #include "raymath.h"
 #include "rlgl.h"
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <vector>
 
 namespace {
@@ -58,10 +60,12 @@ static bool Has(Feature f) { return g_progress.Has(f); }
 static Color Darken(Color c, float k = 0.6f) {
     return Color{ (unsigned char)(c.r * k), (unsigned char)(c.g * k), (unsigned char)(c.b * k), c.a };
 }
-static void Part(Vector3 c, Vector3 s, Color col) {
-    DrawCubeV(c, s, col);
-    DrawCubeWiresV(c, s, Darken(col));
+static void Part(Vector3 c, Vector3 s, Color col) { gfx::Box(c, s, col); }
+// Trụ đứng: đáy tại base, cao h
+static void Cyl(Vector3 base, float rTop, float rBot, float h, int slices, Color col) {
+    gfx::Cylinder(base, { base.x, base.y + h, base.z }, rBot, rTop, col, slices);
 }
+static void Sph(Vector3 c, float r, int rings, int slices, Color col) { gfx::Sphere(c, r, col, rings, slices); }
 static void AddSolid(Vector3 c, Vector3 s) {
     O.solids.push_back({ { c.x - s.x / 2, 0, c.z - s.z / 2 }, { c.x + s.x / 2, 3, c.z + s.z / 2 } });
 }
@@ -99,7 +103,7 @@ bool office::ModalOpen() { return O.roadmap; }
 // -----------------------------------------------------------------------------
 // Màn hình máy tính: code của bài hiện tại tự "gõ" ra từng ký tự
 // -----------------------------------------------------------------------------
-void office::RenderScreens() {
+static void RenderScreens() {
     if (!O.screenOk) return;
     const auto& lessons = GetLessons();
     int idx = std::min(g_progress.completed, (int)lessons.size() - 1);
@@ -229,19 +233,6 @@ office::Action office::Update(float dt, bool titleMode) {
 // -----------------------------------------------------------------------------
 // Vẽ căn phòng
 // -----------------------------------------------------------------------------
-static void DrawScreenQuad(Texture2D tex, Vector3 c, float w, float h) {
-    rlSetTexture(tex.id);
-    rlBegin(RL_QUADS);
-    rlColor4ub(255, 255, 255, 255);
-    rlNormal3f(0, 0, 1);
-    // render texture bị lật dọc nên v = 0 ở dưới
-    rlTexCoord2f(0, 0); rlVertex3f(c.x - w / 2, c.y - h / 2, c.z);
-    rlTexCoord2f(1, 0); rlVertex3f(c.x + w / 2, c.y - h / 2, c.z);
-    rlTexCoord2f(1, 1); rlVertex3f(c.x + w / 2, c.y + h / 2, c.z);
-    rlTexCoord2f(0, 1); rlVertex3f(c.x - w / 2, c.y + h / 2, c.z);
-    rlEnd();
-    rlSetTexture(0);
-}
 
 static void DrawRoom() {
     // Sàn gỗ
@@ -260,11 +251,6 @@ static void DrawRoom() {
 
     // Cửa sổ nhìn ra thành phố
     Part({ 3.2f, 2.4f, -ROOM_Z + 0.02f }, { 3.4f, 1.9f, 0.06f }, Color{ 90, 70, 52, 255 });
-    DrawCube({ 3.2f, 2.4f, -ROOM_Z + 0.06f }, 3.1f, 1.6f, 0.02f, Color{ 120, 170, 225, 255 });
-    for (int i = 0; i < 7; ++i) {
-        float h = 0.3f + ((i * 37) % 7) * 0.12f;
-        DrawCube({ 1.9f + i * 0.43f, 1.6f + h / 2, -ROOM_Z + 0.08f }, 0.36f, h, 0.01f, Color{ 70, 96, 140, 255 });
-    }
     DrawCube({ 3.2f, 2.4f, -ROOM_Z + 0.09f }, 0.06f, 1.6f, 0.02f, Color{ 90, 70, 52, 255 });
 
     // Bảng trắng trên tường trái: kế hoạch dự án
@@ -289,25 +275,25 @@ static void DrawRoom() {
     Part({ d.x, 1.02f, d.z - 0.25f }, { 0.5f, 0.04f, 0.3f }, Color{ 40, 40, 46, 255 });
     Part({ d.x, 1.2f, d.z - 0.3f }, { 0.08f, 0.35f, 0.08f }, Color{ 40, 40, 46, 255 });
     Part({ d.x, 1.75f, d.z - 0.34f }, { 1.72f, 1.06f, 0.06f }, Color{ 28, 28, 32, 255 });
-    if (O.screenOk) DrawScreenQuad(O.screen.texture, { d.x, 1.75f, d.z - 0.305f }, 1.6f, 1.0f);
     // Màn hình phụ dọc
     Part({ d.x + 1.25f, 1.6f, d.z - 0.2f }, { 0.5f, 0.85f, 0.05f }, Color{ 28, 28, 32, 255 });
-    DrawCube({ d.x + 1.25f, 1.6f, d.z - 0.17f }, 0.44f, 0.78f, 0.01f, Color{ 24, 60, 52, 255 });
-    for (int i = 0; i < 8; ++i)
-        DrawCube({ d.x + 1.18f + (i % 3) * 0.03f, 1.9f - i * 0.08f, d.z - 0.16f }, 0.2f + (i % 4) * 0.04f, 0.025f, 0.01f, pal::good);
+    // Đèn bàn
+    Cyl({ d.x + 0.95f, 0.96f, d.z + 0.1f }, 0.12f, 0.14f, 0.04f, 12, Color{ 40, 40, 46, 255 });
+    gfx::Cylinder({ d.x + 0.95f, 1.0f, d.z + 0.1f }, { d.x + 0.85f, 1.55f, d.z - 0.05f }, 0.02f, 0.02f, Color{ 40, 40, 46, 255 }, 6);
+    gfx::Cylinder({ d.x + 0.85f, 1.55f, d.z - 0.05f }, { d.x + 0.62f, 1.45f, d.z + 0.1f }, 0.05f, 0.13f, Color{ 230, 120, 50, 255 }, 12);
     // Bàn phím, chuột, cốc cà phê, giấy note
     Part({ d.x, 0.98f, d.z + 0.25f }, { 0.9f, 0.04f, 0.3f }, Color{ 50, 52, 60, 255 });
     Part({ d.x + 0.7f, 0.98f, d.z + 0.3f }, { 0.1f, 0.04f, 0.16f }, Color{ 50, 52, 60, 255 });
-    DrawCylinder({ d.x - 1.1f, 0.96f, d.z + 0.2f }, 0.09f, 0.08f, 0.2f, 10, Color{ 230, 230, 235, 255 });
-    DrawCylinder({ d.x - 1.1f, 1.15f, d.z + 0.2f }, 0.075f, 0.075f, 0.01f, 10, Color{ 80, 50, 30, 255 });
+    Cyl({ d.x - 1.1f, 0.96f, d.z + 0.2f }, 0.09f, 0.08f, 0.2f, 10, Color{ 230, 230, 235, 255 });
+    Cyl({ d.x - 1.1f, 1.15f, d.z + 0.2f }, 0.075f, 0.075f, 0.01f, 10, Color{ 80, 50, 30, 255 });
     DrawCube({ d.x - 0.75f, 2.1f, d.z - 0.3f }, 0.16f, 0.16f, 0.01f, Color{ 255, 230, 110, 255 });
     DrawCube({ d.x + 0.8f, 2.12f, d.z - 0.3f }, 0.16f, 0.16f, 0.01f, Color{ 255, 150, 190, 255 });
     // Ghế
     Vector3 ch = { d.x, 0, d.z + 1.1f };
     Part({ ch.x, 0.55f, ch.z }, { 0.6f, 0.1f, 0.6f }, Color{ 40, 44, 56, 255 });
     Part({ ch.x, 1.0f, ch.z + 0.28f }, { 0.6f, 0.8f, 0.08f }, Color{ 40, 44, 56, 255 });
-    DrawCylinder({ ch.x, 0.1f, ch.z }, 0.04f, 0.04f, 0.45f, 6, DARKGRAY);
-    DrawCylinder({ ch.x, 0.02f, ch.z }, 0.3f, 0.3f, 0.06f, 8, Color{ 30, 30, 34, 255 });
+    Cyl({ ch.x, 0.1f, ch.z }, 0.04f, 0.04f, 0.45f, 6, DARKGRAY);
+    Cyl({ ch.x, 0.02f, ch.z }, 0.3f, 0.3f, 0.06f, 8, Color{ 30, 30, 34, 255 });
 
     // Kệ sách: khung mở phía trước để thấy sách
     Vector3 s = SHELF_POS;
@@ -331,29 +317,28 @@ static void DrawRoom() {
     Part({ cf.x, 0.45f, cf.z }, { 1.6f, 0.9f, 0.9f }, Color{ 230, 230, 234, 255 });
     Part({ cf.x - 0.2f, 1.2f, cf.z - 0.1f }, { 0.5f, 0.6f, 0.45f }, Color{ 50, 50, 56, 255 });
     DrawCube({ cf.x - 0.2f, 1.3f, cf.z + 0.13f }, 0.2f, 0.1f, 0.01f, pal::bad);
-    DrawCylinder({ cf.x + 0.45f, 0.9f, cf.z }, 0.07f, 0.06f, 0.16f, 8, Color{ 200, 80, 60, 255 });
+    Cyl({ cf.x + 0.45f, 0.9f, cf.z }, 0.07f, 0.06f, 0.16f, 8, Color{ 200, 80, 60, 255 });
 
     // Cây xanh
     for (Vector3 p : { Vector3{ -6.8f, 0, 4.8f }, Vector3{ 7.0f, 0, 4.6f } }) {
-        DrawCylinder(p, 0.32f, 0.26f, 0.55f, 10, Color{ 170, 100, 70, 255 });
-        DrawSphereEx({ p.x, 0.95f, p.z }, 0.45f, 8, 8, Color{ 70, 150, 80, 255 });
-        DrawSphereEx({ p.x + 0.2f, 1.3f, p.z }, 0.3f, 8, 8, Color{ 80, 170, 90, 255 });
+        Cyl(p, 0.32f, 0.26f, 0.55f, 10, Color{ 170, 100, 70, 255 });
+        Sph({ p.x, 0.95f, p.z }, 0.45f, 8, 8, Color{ 70, 150, 80, 255 });
+        Sph({ p.x + 0.2f, 1.3f, p.z }, 0.3f, 8, 8, Color{ 80, 170, 90, 255 });
     }
 }
 
 static void DrawArenaPad() {
     Vector3 a = ARENA_POS;
-    DrawCylinder(a, 2.0f, 2.1f, 0.2f, 24, Color{ 40, 44, 60, 255 });
-    DrawCylinderWires(a, 2.0f, 2.1f, 0.2f, 24, Has(F_ARENA) ? pal::accent : Color{ 90, 90, 100, 255 });
-    DrawCylinder({ a.x, 0.2f, a.z }, 1.85f, 1.85f, 0.01f, 24, Color{ 52, 58, 80, 255 });
+    Cyl(a, 2.0f, 2.1f, 0.2f, 24, Color{ 40, 44, 60, 255 });
+    Cyl({ a.x, 0.2f, a.z }, 1.85f, 1.85f, 0.01f, 24, Color{ 52, 58, 80, 255 });
 
     if (!Has(F_ARENA)) {
         // Đang thi công: cọc chắn màu cam
         for (int i = 0; i < 4; ++i) {
             float ang = i * PI / 2 + PI / 4;
             Vector3 p = { a.x + std::cos(ang) * 1.3f, 0.2f, a.z + std::sin(ang) * 1.3f };
-            DrawCylinder(p, 0.03f, 0.18f, 0.45f, 8, Color{ 255, 130, 30, 255 });
-            DrawCylinder({ p.x, p.y + 0.18f, p.z }, 0.11f, 0.12f, 0.06f, 8, WHITE);
+            Cyl(p, 0.03f, 0.18f, 0.45f, 8, Color{ 255, 130, 30, 255 });
+            Cyl({ p.x, p.y + 0.18f, p.z }, 0.11f, 0.12f, 0.06f, 8, WHITE);
         }
         Part({ a.x, 0.55f, a.z + 1.3f }, { 2.0f, 0.08f, 0.04f }, Color{ 255, 210, 40, 255 });
         return;
@@ -422,14 +407,33 @@ static void DrawRoadmap() {
     ui::TextCentered("Nhấn E hoặc Esc để đóng", W / 2, r.y + ph - 32 * s, 15 * s, pal::dim);
 }
 
-void office::Draw(bool titleMode) {
-    float s = ui::S();
-    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
-    DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{ 34, 38, 54, 255 }, Color{ 18, 20, 30, 255 });
+// -----------------------------------------------------------------------------
+// Ánh sáng của văn phòng (Bài 15)
+// -----------------------------------------------------------------------------
+static void SetupEnvironment() {
+    gfx::Environment e;
+    e.sunDir = { 0.45f, -1.0f, -0.35f };
+    e.sunColor = { 255, 236, 205, 255 };
+    e.sunIntensity = 0.95f;
+    e.sky = { 172, 186, 218, 255 };
+    e.ground = { 124, 92, 70, 255 };
+    e.ambient = 0.55f;
+    e.fog = { 24, 26, 38, 255 };
+    e.fogNear = 24; e.fogFar = 48;
+    Vector3 d = DESK_POS;
+    float flicker = 1.0f + std::sin(O.time * 7.0f) * 0.03f;
+    e.lights[0] = { { d.x + 0.62f, 1.35f, d.z + 0.25f }, Color{ 255, 176, 96, 255 }, 1.7f * flicker, 4.5f };   // đèn bàn
+    e.lights[1] = { { d.x, 1.75f, d.z + 0.25f }, Color{ 90, 160, 255, 255 }, 0.9f, 3.5f };                   // màn hình
+    e.lights[2] = { { 3.2f, 2.4f, -ROOM_Z + 0.6f }, Color{ 150, 190, 255, 255 }, 1.0f, 6.5f };              // cửa sổ
+    e.lightCount = 3;
+    if (Has(F_ARENA)) e.lights[e.lightCount++] = { { ARENA_POS.x, 0.8f, ARENA_POS.z }, pal::accent, 1.1f, 3.8f };
+    e.shadowCenter = { 0, 0, -0.5f };
+    e.shadowSize = 22;
+    e.bloom = 0.4f; e.bloomThreshold = 0.82f; e.vignette = 0.42f;
+    gfx::SetEnvironment(e);
+}
 
-    BeginMode3D(O.cam);
-    DrawRoom();
-    DrawArenaPad();
+static void DrawDev() {
     rlPushMatrix();
     rlTranslatef(O.dev.pos.x, 0, O.dev.pos.z);
     rlRotatef(O.yaw, 0, 1, 0);
@@ -438,8 +442,94 @@ void office::Draw(bool titleMode) {
     local.facing = 1;
     DrawFighterModel(local, true, O.time);
     rlPopMatrix();
-    EndMode3D();
+}
 
+// Quad có texture, mặt quay về +z
+static void Quad(Texture2D tex, Vector3 c, float w, float h, Color tint = WHITE) {
+    rlSetTexture(tex.id);
+    rlBegin(RL_QUADS);
+    rlColor4ub(tint.r, tint.g, tint.b, tint.a);
+    rlNormal3f(0, 0, 1);
+    rlTexCoord2f(0, 0); rlVertex3f(c.x - w / 2, c.y - h / 2, c.z);
+    rlTexCoord2f(1, 0); rlVertex3f(c.x + w / 2, c.y - h / 2, c.z);
+    rlTexCoord2f(1, 1); rlVertex3f(c.x + w / 2, c.y + h / 2, c.z);
+    rlTexCoord2f(0, 1); rlVertex3f(c.x - w / 2, c.y + h / 2, c.z);
+    rlEnd();
+    rlSetTexture(0);
+}
+
+// Vật phát sáng: màn hình, cửa sổ, bóng đèn, tia nắng, bụi bay
+static void DrawGlow() {
+    Vector3 d = DESK_POS;
+    if (O.screenOk) Quad(O.screen.texture, { d.x, 1.75f, d.z - 0.305f }, 1.6f, 1.0f);
+    // Màn hình phụ
+    DrawCube({ d.x + 1.25f, 1.6f, d.z - 0.17f }, 0.44f, 0.78f, 0.01f, Color{ 16, 44, 40, 255 });
+    for (int i = 0; i < 8; ++i)
+        DrawCube({ d.x + 1.18f + (i % 3) * 0.03f, 1.9f - i * 0.08f, d.z - 0.16f }, 0.2f + (i % 4) * 0.04f, 0.025f, 0.01f, pal::good);
+    // Cửa sổ: bầu trời + nhà cao tầng
+    rlBegin(RL_QUADS);
+    float wz = -ROOM_Z + 0.06f;
+    rlColor4ub(150, 200, 250, 255); rlVertex3f(1.65f, 1.6f, wz); rlVertex3f(4.75f, 1.6f, wz);
+    rlColor4ub(80, 140, 220, 255);  rlVertex3f(4.75f, 3.2f, wz); rlVertex3f(1.65f, 3.2f, wz);
+    rlEnd();
+    for (int i = 0; i < 7; ++i) {
+        float h = 0.3f + ((i * 37) % 7) * 0.12f;
+        DrawCube({ 1.9f + i * 0.43f, 1.6f + h / 2, wz + 0.02f }, 0.36f, h, 0.01f, Color{ 70, 96, 140, 255 });
+        for (int k = 0; k < 3; ++k)
+            if ((i + k) % 2 == 0) DrawCube({ 1.84f + i * 0.43f + (k % 2) * 0.1f, 1.7f + k * 0.12f, wz + 0.03f }, 0.05f, 0.05f, 0.005f, Color{ 255, 230, 150, 255 });
+    }
+    DrawCube({ 3.2f, 2.4f, wz + 0.04f }, 0.06f, 1.6f, 0.02f, Color{ 90, 70, 52, 255 });
+    DrawCube({ 3.2f, 2.4f, wz + 0.04f }, 3.1f, 0.05f, 0.02f, Color{ 90, 70, 52, 255 });
+
+    gfx::BeginGlow();
+    DrawSphere({ d.x + 0.66f, 1.43f, d.z + 0.15f }, 0.06f, Color{ 255, 220, 160, 255 });    // bóng đèn bàn
+    // Tia nắng chiếu xiên qua cửa sổ
+    rlBegin(RL_QUADS);
+    rlColor4ub(255, 240, 200, 28); rlVertex3f(1.7f, 3.15f, wz + 0.05f);
+    rlColor4ub(255, 240, 200, 0);  rlVertex3f(2.4f, 0.02f, -2.2f);
+    rlColor4ub(255, 240, 200, 0);  rlVertex3f(5.4f, 0.02f, -2.2f);
+    rlColor4ub(255, 240, 200, 28); rlVertex3f(4.7f, 3.15f, wz + 0.05f);
+    rlEnd();
+    // Bụi bay lơ lửng trong nắng
+    for (int i = 0; i < 40; ++i) {
+        float t = O.time * 0.15f + i * 0.37f;
+        float x = 2.0f + std::fmod(i * 0.61f + std::sin(t) * 0.3f, 3.2f);
+        float y = 0.3f + std::fmod(i * 0.53f + t * 0.4f, 2.8f);
+        float z = -5.3f + std::fmod(i * 0.29f, 2.6f) + (3.0f - y) * 0.2f;
+        DrawCube({ x, y, z }, 0.02f, 0.02f, 0.02f, Color{ 255, 240, 200, 90 });
+    }
+    if (Has(F_ARENA)) {
+        float pulse = 0.6f + 0.4f * std::sin(O.time * 2.5f);
+        for (int i = 0; i < 48; ++i) {                                          // vòng đèn quanh võ đài
+            float a = i * 2 * PI / 48;
+            DrawCube({ ARENA_POS.x + std::cos(a) * 2.05f, 0.21f, ARENA_POS.z + std::sin(a) * 2.05f }, 0.08f, 0.03f, 0.08f, Fade(pal::accent, pulse));
+        }
+    }
+    gfx::EndGlow();
+}
+
+void office::RenderOffscreen() {
+    SetupEnvironment();
+    RenderScreens();
+    gfx::RenderShadowMap([] { DrawRoom(); DrawArenaPad(); DrawDev(); });
+}
+
+void office::Draw3D() {
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    DrawRectangleGradientV(0, 0, (int)W, (int)H, Color{ 34, 38, 54, 255 }, Color{ 14, 16, 24, 255 });
+    BeginMode3D(O.cam);
+    gfx::BeginLit(O.cam);
+    DrawRoom();
+    DrawArenaPad();
+    DrawDev();
+    gfx::EndLit();
+    DrawGlow();
+    EndMode3D();
+}
+
+void office::DrawHUD(bool titleMode) {
+    float s = ui::S();
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
     if (titleMode) return;
 
     // Nhãn nổi trên các đồ vật
