@@ -11,6 +11,33 @@ Bạn vào vai **Minh**, một dev indie đang viết một **game đối kháng
 
 **Đồ họa**: ánh sáng bằng shader GLSL (Lambert + Blinn-Phong + đèn điểm), bóng đổ thời gian thực (shadow map), hậu kỳ bloom / FXAA / vignette, slow-motion và tách màu khi K.O., pháo giấy, màn hình LED, sân khấu Neon ban đêm. **Âm thanh**: mọi tiếng đấm, đá, đỡ và nhạc nền chiptune đều được tổng hợp bằng code, không dùng file âm thanh nào.
 
+## Bạn TỰ CODE từng tính năng
+
+Mỗi bài học kết thúc bằng một **thử thách code**: bạn gõ C++ (bài 15 là GLSL) ngay trong trình soạn thảo của game, bấm **F5** để chấm. Game có sẵn một **trình thông dịch C++ thu nhỏ** tự viết (`src/MiniCpp.cpp`) nên không cần cài trình biên dịch: báo lỗi theo dòng bằng tiếng Việt (thiếu `;`, chia cho 0, vòng lặp vô hạn, biến chưa khai báo...) và chạy các test tự động.
+
+Qua thử thách, **game dùng CHÍNH HÀM BẠN VIẾT**:
+
+| Bài | Bạn viết | Game dùng để |
+|---|---|---|
+| 1 | `float TiLeMau(int mau, int mauToiDa)` | vẽ thanh máu |
+| 2 | `bool KetThucHiep(...)`, `int SoDonDeKO(...)` (vòng lặp) | kết thúc hiệp, hiện số đòn còn lại |
+| 3 | `int TinhSatThuong(int lucDanh, bool biDo)` | tính sát thương mỗi đòn |
+| 4 | `class Fighter { void NhanDon(int) }` | trừ máu, phát hiện K.O. |
+| 5 | `class VoSiCuaBan : public Character` | võ sĩ "Của bạn" do bạn thiết kế chỉ số |
+| 6 | `void CapNhatHat(Particle& p, float dt)` | chuyển động tia lửa |
+| 7 | `int DonManhNhat(const std::vector<int>&)` | thống kê "đòn mạnh nhất" |
+| 8 | `float DiChuyen(x, huong, tocDo, dt)` | bước chân võ sĩ (delta time) |
+| 9 | `void TrongLuc(float& y, float& vy, float dt)` | vật lý cú nhảy |
+| 10 | `bool DangGayDon(int loaiDon, float t)` | frame data: khi nào hitbox bật |
+| 11 | `bool VaCham(Hop a, Hop b)` | hitbox / hurtbox |
+| 12 | `int ChonHanhDong(...)` | bộ não AI đối thủ |
+| 13 | `float Lerp(a, b, t)` | camera bám theo trận đấu |
+| 14 | `int NguoiThang(tiLe1, tiLe2)` | luật hết giờ |
+| 15 | GLSL `float AnhSang(vec3 N, vec3 L)` | ánh sáng mặt trời trên GPU |
+| 16 | `float MauAmThanh(float t)` | âm thanh cú đấm |
+
+Code được lưu ở thư mục `code/` cạnh file exe (`code/bai_01.cpp`...), mở được bằng IDE thật. Nếu code của bạn lỗi khi đang chơi, game báo lỗi và tạm dùng code mẫu. Bí quá? Có nút **Gợi ý**, và sau 2 lần sai thì mở được **Lời giải** (nhưng bài đó chỉ được 1 sao).
+
 Mọi khái niệm trong bài học đều có **file ví dụ chạy được** trong thư mục [`lessons/`](lessons) và đều **được dùng thật** trong mã nguồn game ở [`src/`](src). Học xong, bạn đọc được toàn bộ code của chính game mình vừa chơi.
 
 ---
@@ -33,6 +60,7 @@ Mỗi lần push code, GitHub Actions cũng build lại bản Windows bằng Vis
 |---|---|
 | Văn phòng | `W A S D` / phím mũi tên: đi lại · `E`: tương tác |
 | Máy tính (bài học) | `→` / `Enter`: tiếp · `←`: quay lại · `1-4`: chọn đáp án · `R`: thử lại · con lăn chuột: cuộn · `Esc`: thoát |
+| Thử thách code | `F5` hoặc `Ctrl+Enter`: chạy test · `Ctrl+Z/Y`: hoàn tác/làm lại · `Ctrl+C/X/V/A` · `Ctrl+/`: chú thích · `Tab`/`Shift+Tab`: thụt lề · `Esc`: rời ô code |
 | Võ đài | `A D`: đi · `W`/`Space`: nhảy · `J`: đấm · `K`: đá · `L` (giữ): đỡ · `Shift`: lướt · `H`: xem hitbox · `P`: tạm dừng · `Esc`: về văn phòng |
 | Màn chọn võ sĩ | `A D`: chọn · `W S`: độ khó · `Q E`: đổi sân khấu (sau Bài 15) · `Enter`: vào trận |
 | Mọi lúc | `F2`: chất lượng đồ họa (Thấp / Trung bình / Cao) · `M`: bật/tắt âm thanh · `F11`: toàn màn hình |
@@ -123,6 +151,10 @@ Sau khi học xong, hãy đọc `src/` theo thứ tự này:
 | [`src/LessonScreen.cpp`](src/LessonScreen.cpp) | Màn hình học, quiz | 2, 7 |
 | [`src/Lessons.cpp`](src/Lessons.cpp) | Toàn bộ nội dung bài học (dạng dữ liệu) | 14 |
 | [`src/UI.cpp`](src/UI.cpp) | Font tiếng Việt, tự xuống dòng, tô màu cú pháp C++ | 1, 3, 7 |
+| [`src/MiniCpp.cpp`](src/MiniCpp.cpp) | Trình thông dịch C++ thu nhỏ: lexer → parser → cây cú pháp → chạy | tất cả |
+| [`src/Challenges.cpp`](src/Challenges.cpp) | Đề bài + test tự động của 16 thử thách | tất cả |
+| [`src/PlayerCode.cpp`](src/PlayerCode.cpp) | Nối hàm người chơi viết vào game | tất cả |
+| [`src/CodeEditor.cpp`](src/CodeEditor.cpp) | Trình soạn thảo code trong game | 2, 7 |
 
 Trong `Arena.cpp`, mỗi dòng `if (Has(F_...))` là một "công tắc" tính năng. Thử tắt/bật để xem game thay đổi thế nào!
 

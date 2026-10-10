@@ -7,6 +7,7 @@
 // =============================================================================
 #include "Arena.h"
 #include "Audio.h"
+#include "PlayerCode.h"
 #include "Gfx.h"
 #include "Common.h"
 #include "Lessons.h"
@@ -29,7 +30,25 @@ static const CharStats CHAR_STATS[] = {
     { "Bao cát", "Chỉ biết đứng chịu đòn",        0.0f,  0,  0, 100, { 176, 124,  72, 255 }, { 120,  80,  46, 255 }, { 176, 124,  72, 255 } },
 };
 
-const CharStats& GetCharacterStats(CharType t) { return CHAR_STATS[(int)t]; }
+// Bài 5: võ sĩ do người chơi tự thiết kế bằng class VoSiCuaBan : public Character
+static CharStats g_custom = { "Của bạn", "Do chính bạn lập trình (Bài 5)", 4.0f, 8, 12, 100,
+                              { 70, 52, 140, 255 }, { 92, 214, 130, 255 }, { 236, 196, 160, 255 } };
+
+const CharStats& GetCharacterStats(CharType t) {
+    if (t == CharType::Custom) {
+        float sp; int pu, ki, hp;
+        if (pcode::VoSiCuaBan(sp, pu, ki, hp)) {
+            g_custom.speed = Clamp(sp, 2.5f, 6.5f);
+            g_custom.punch = (float)std::clamp(pu, 4, 14);
+            g_custom.kick = (float)std::clamp(ki, 6, 18);
+            g_custom.maxHp = (float)std::clamp(hp, 70, 140);
+        }
+        return g_custom;
+    }
+    return CHAR_STATS[(int)t];
+}
+
+static int CharCount() { return pcode::Active(F_CHARSELECT) ? 4 : 3; }   // có võ sĩ "Của bạn" không
 
 static bool Has(Feature f) { return g_progress.Has(f); }
 static float Rand01() { return GetRandomValue(0, 10000) / 10000.0f; }
@@ -104,10 +123,13 @@ static void LockedHint(Feature f) {
 // -----------------------------------------------------------------------------
 // Khởi tạo
 // -----------------------------------------------------------------------------
+static CharType SelType(int sel) { return sel == 4 ? CharType::Custom : (CharType)sel; }
+
 static void ResetFighter(Fighter& f, CharType t, bool player) {
     int won = f.roundsWon;
     auto stats = f.stats;
     int best = f.bestCombo;
+    auto hits = f.hits;
     f = Fighter{};
     f.type = t;
     f.isPlayer = player;
@@ -117,6 +139,7 @@ static void ResetFighter(Fighter& f, CharType t, bool player) {
     f.roundsWon = won;
     f.stats = stats;
     f.bestCombo = best;
+    f.hits = hits;
 }
 
 static void StartRound() {
@@ -139,7 +162,7 @@ static void StartMatch() {
         S.rules.roundTime = 60;
         S.rules.difficulty = S.selDiff;
     }
-    CharType me = Has(F_CHARSELECT) ? (CharType)S.selChar : CharType::Dev;
+    CharType me = Has(F_CHARSELECT) ? SelType(S.selChar) : CharType::Dev;
     CharType foe = CharType::Dummy;
     if (Has(F_AI)) foe = Has(F_CHARSELECT) ? (CharType)GetRandomValue(1, 3) : CharType::Dev;
     S.p1 = Fighter{}; S.p2 = Fighter{};
@@ -161,7 +184,7 @@ void arena::Enter() {
         S.phase = Phase::Select;
         S.phaseTime = 0;
         S.p1 = Fighter{};
-        S.p1.type = (CharType)S.selChar;
+        S.p1.type = SelType(S.selChar);
         S.p1.isPlayer = true;
         S.p2 = Fighter{};
     } else {
@@ -209,9 +232,15 @@ static Input AIUpdate(AIBrain& ai, const Fighter& me, const Fighter& foe, float 
     if (ai.timer <= 0) {                                   // AIThink
         ai.timer = REACTION[d] * (0.7f + Rand01() * 0.6f);
         bool foeAttacking = (foe.state == FState::Punch || foe.state == FState::Kick) && foe.stateTime < 0.2f;
-        if (foeAttacking && dist < 2.2f && Rand01() < BLOCK_P[d]) { ai.mode = AIMode::Defend; ai.blockHold = 0.45f; }
-        else if (dist > 1.5f) ai.mode = (Rand01() < 0.85f) ? AIMode::Approach : AIMode::Retreat;
-        else ai.mode = (Rand01() < AGGRO[d]) ? AIMode::Attack : AIMode::Retreat;
+        AIMode fallback;
+        if (foeAttacking && dist < 2.2f && Rand01() < BLOCK_P[d]) fallback = AIMode::Defend;
+        else if (dist > 1.5f) fallback = (Rand01() < 0.85f) ? AIMode::Approach : AIMode::Retreat;
+        else fallback = (Rand01() < AGGRO[d]) ? AIMode::Attack : AIMode::Retreat;
+        // Bài 12: bộ não AI do người chơi viết (0 tiếp cận, 1 lùi, 2 tấn công, 3 phòng thủ)
+        static const AIMode MAP[4] = { AIMode::Approach, AIMode::Retreat, AIMode::Attack, AIMode::Defend };
+        int pick = pcode::ChonHanhDong(dist, foeAttacking, Rand01(), (int)fallback);
+        ai.mode = (pick >= 0 && pick < 4) ? MAP[pick] : fallback;
+        if (ai.mode == AIMode::Defend) ai.blockHold = 0.45f;
     }
 
     int dir = (foe.pos.x > me.pos.x) ? 1 : -1;               // AIAct
@@ -258,8 +287,9 @@ static BoundingBox AttackBox(const Fighter& f) {
 }
 
 static bool AttackActive(const Fighter& f) {
-    if (f.state == FState::Punch) return f.stateTime >= PUNCH_ON && f.stateTime < PUNCH_OFF;
-    if (f.state == FState::Kick)  return f.stateTime >= KICK_ON && f.stateTime < KICK_OFF;
+    // Bài 10: frame data do người chơi viết (DAM = 1, DA = 2)
+    if (f.state == FState::Punch) return pcode::DangGayDon(1, f.stateTime, f.stateTime >= PUNCH_ON && f.stateTime < PUNCH_OFF);
+    if (f.state == FState::Kick)  return pcode::DangGayDon(2, f.stateTime, f.stateTime >= KICK_ON && f.stateTime < KICK_OFF);
     return false;
 }
 
@@ -284,11 +314,15 @@ static void UpdateParticles(float dt) {
             p.vel.x += std::sin(S.time * 3 + p.spin) * dt * 2;   // pháo giấy bay lả tả
             p.spin += dt * 400;
             if (p.pos.y < 0.02f) { p.pos.y = 0.02f; p.vel = { 0, 0, 0 }; }
+            p.pos = Vector3Add(p.pos, Vector3Scale(p.vel, dt));
+            p.life -= dt;
+        } else if (pcode::CapNhatHat(p.pos.x, p.pos.y, p.vel.x, p.vel.y, p.life, dt)) {   // Bài 6: code người chơi
+            p.pos.z += p.vel.z * dt;
         } else {
             p.vel.y += GRAVITY * 0.5f * dt;
+            p.pos = Vector3Add(p.pos, Vector3Scale(p.vel, dt));
+            p.life -= dt;
         }
-        p.pos = Vector3Add(p.pos, Vector3Scale(p.vel, dt));
-        p.life -= dt;
     }
     S.particles.erase(std::remove_if(S.particles.begin(), S.particles.end(),
                                      [](const Particle& p) { return p.life <= 0; }),
@@ -304,24 +338,34 @@ static void UpdateParticles(float dt) {
 // -----------------------------------------------------------------------------
 static void ApplyHit(Fighter& a, Fighter& b, bool kick) {
     const CharStats& cs = GetCharacterStats(a.type);
-    float dmg = kick ? cs.kick : cs.punch;
+    int lucDanh = (int)(kick ? cs.kick : cs.punch);
 
     if (Has(F_COMBO)) {
         a.combo = (a.comboTimer > 0) ? a.combo + 1 : 1;
         a.comboTimer = 1.2f;
-        dmg *= 1.0f + 0.1f * (a.combo - 1);
+        lucDanh = (int)std::round(lucDanh * (1.0f + 0.1f * (a.combo - 1)));
         a.bestCombo = std::max(a.bestCombo, a.combo);
     }
 
     bool blocked = (b.state == FState::Block);
-    if (blocked) {
-        dmg *= 0.25f;
-        b.stats["Đỡ đòn thành công"]++;
-    }
+    if (blocked) b.stats["Đỡ đòn thành công"]++;
 
-    b.hp = std::max(0.0f, b.hp - dmg);
+    // Bài 3: hàm TinhSatThuong của người chơi
+    int dmg = pcode::TinhSatThuong(lucDanh, blocked, blocked ? lucDanh / 4 : lucDanh);
+    if (dmg < 0) dmg = 0;
+
+    // Bài 4: hàm thành viên Fighter::NhanDon của người chơi
+    int mau = (int)std::ceil(b.hp);
+    bool conSong = mau > 0;
+    if (pcode::NhanDon(mau, conSong, dmg)) {
+        b.hp = (float)std::clamp(mau, 0, (int)b.maxHp);
+        if (!conSong) b.hp = 0;
+    } else {
+        b.hp = std::max(0.0f, b.hp - dmg);
+    }
     a.stats[kick ? "Đá trúng" : "Đấm trúng"]++;
-    a.stats["Sát thương gây ra"] += (int)std::round(dmg);
+    a.stats["Sát thương gây ra"] += dmg;
+    a.hits.push_back(dmg);
 
     float dir = (b.pos.x >= a.pos.x) ? 1.0f : -1.0f;
     if (b.type != CharType::Dummy)                   // bao cát cắm cố định, không bị đẩy lùi
@@ -342,7 +386,7 @@ static void ApplyHit(Fighter& a, Fighter& b, bool kick) {
 
     Vector3 contact = { a.pos.x + a.facing * (kick ? 0.95f : 0.8f), a.pos.y + (kick ? 0.85f : 1.45f), 0.3f };
     S.popups.push_back({ { b.pos.x, b.pos.y + 2.2f, 0 },
-                         blocked ? "ĐỠ!" : TextFormat("-%d", (int)std::round(dmg)),
+                         blocked ? "ĐỠ!" : TextFormat("-%d", dmg),
                          0.9f, blocked ? pal::accent2 : (kick ? pal::accent : WHITE), blocked ? 26.0f : 30.0f });
 
     S.hitLightPos = contact;
@@ -367,7 +411,9 @@ static void CheckAttack(Fighter& a, Fighter& b) {
     bool kick = (a.state == FState::Kick);
     bool hit;
     if (Has(F_HITBOX)) {
-        hit = CheckCollisionBoxes(AttackBox(a), HurtBox(b));
+        BoundingBox ab = AttackBox(a), hb = HurtBox(b);
+        hit = pcode::VaCham(ab.min.x, ab.min.y, ab.max.x, ab.max.y, hb.min.x, hb.min.y, hb.max.x, hb.max.y,
+                            CheckCollisionBoxes(ab, hb));                     // Bài 11: code người chơi
     } else {
         // Trước Bài 11: chỉ đo khoảng cách -> đấm sau lưng vẫn trúng!
         float reach = kick ? 1.6f : 1.4f;
@@ -430,20 +476,26 @@ static void UpdateFighter(Fighter& f, const Input& in, const Fighter& foe, float
     }
 
     // Di chuyển ngang: tốc độ * dt (Bài 8)
-    float mx = 0;
-    if (f.state == FState::Walk) mx = in.moveX * cs.speed;
-    if (!f.onGround && (f.state == FState::Punch || f.state == FState::Kick)) mx = in.moveX * cs.speed * 0.6f;
+    int huong = 0;
+    float tocDo = cs.speed;
+    if (f.state == FState::Walk) huong = in.moveX;
+    if (!f.onGround && (f.state == FState::Punch || f.state == FState::Kick)) { huong = in.moveX; tocDo *= 0.6f; }
     if (f.dashTimer > 0) {
-        mx = f.dashDir * 18.0f;
+        huong = (int)f.dashDir;
+        tocDo = 18.0f;
         f.dashTimer -= dt;
     }
-    f.pos.x += (mx + f.vel.x) * dt;
+    if (huong != 0 && dt > 0)                          // Bài 8: hàm DiChuyen của người chơi
+        f.pos.x = pcode::DiChuyen(f.pos.x, huong, tocDo, dt, f.pos.x + huong * tocDo * dt);
+    f.pos.x += f.vel.x * dt;
     f.vel.x = Approach(f.vel.x, 0, (f.onGround ? 14.0f : 4.0f) * dt);   // knockback giảm dần
 
     // Trọng lực (Bài 9)
     if (!f.onGround || f.vel.y > 0) {
-        f.vel.y += GRAVITY * dt;
-        f.pos.y += f.vel.y * dt;
+        if (dt > 0 && !pcode::TrongLuc(f.pos.y, f.vel.y, dt)) {    // Bài 9: hàm TrongLuc của người chơi
+            f.vel.y += GRAVITY * dt;
+            f.pos.y += f.vel.y * dt;
+        }
         if (f.pos.y <= 0) { f.pos.y = 0; f.vel.y = 0; f.onGround = true; }
     }
     f.pos.x = Clamp(f.pos.x, -ARENA_HALF, ARENA_HALF);
@@ -464,8 +516,9 @@ static void UpdateCam(float dt) {
         Vector3 wantPos = { mid * 0.85f, 3.0f + dist * 0.08f, 8.0f + dist * 0.55f };
         Vector3 wantTarget = { mid * 0.9f, 1.3f, 0 };
         float k = std::min(1.0f, 4.0f * dt);
-        S.camPos = Vector3Lerp(S.camPos, wantPos, k);
-        S.camTarget = Vector3Lerp(S.camTarget, wantTarget, k);
+        auto L = [k](float a, float b) { return pcode::Lerp(a, b, k, a + (b - a) * k); };   // Bài 13: hàm Lerp của người chơi
+        S.camPos = { L(S.camPos.x, wantPos.x), L(S.camPos.y, wantPos.y), L(S.camPos.z, wantPos.z) };
+        S.camTarget = { L(S.camTarget.x, wantTarget.x), L(S.camTarget.y, wantTarget.y), L(S.camTarget.z, wantTarget.z) };
     } else {
         S.camPos = { 0, 2.5f, 10.0f };
         S.camTarget = { 0, 1.55f, 0 };
@@ -486,15 +539,17 @@ static void UpdateCam(float dt) {
 // Vòng cập nhật võ đài
 // -----------------------------------------------------------------------------
 static void UpdateSelect() {
-    if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT))  S.selChar = (S.selChar == 1) ? 3 : S.selChar - 1;
-    if (IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) S.selChar = (S.selChar == 3) ? 1 : S.selChar + 1;
+    int n = CharCount();
+    if (S.selChar > n) S.selChar = 1;
+    if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_LEFT))  S.selChar = (S.selChar == 1) ? n : S.selChar - 1;
+    if (IsKeyPressed(KEY_D) || IsKeyPressed(KEY_RIGHT)) S.selChar = (S.selChar == n) ? 1 : S.selChar + 1;
     if (Has(F_ROUNDS)) {
         if (IsKeyPressed(KEY_W) || IsKeyPressed(KEY_UP))   S.selDiff = std::max(0, S.selDiff - 1);
         if (IsKeyPressed(KEY_S) || IsKeyPressed(KEY_DOWN)) S.selDiff = std::min(2, S.selDiff + 1);
     }
     if (Has(F_NEON_STAGE) && (IsKeyPressed(KEY_Q) || IsKeyPressed(KEY_E))) { S.stage = 1 - S.stage; sfx::Play(sfx::CLICK); }
     if (IsKeyPressed(KEY_A) || IsKeyPressed(KEY_D) || IsKeyPressed(KEY_LEFT) || IsKeyPressed(KEY_RIGHT)) sfx::Play(sfx::CLICK);
-    S.p1.type = (CharType)S.selChar;
+    S.p1.type = SelType(S.selChar);
     S.p1.pos = { 0, 0, 0 };
     S.p1.facing = 1;
     if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_J)) StartMatch();
@@ -581,11 +636,15 @@ bool arena::Update(float dt) {
                 S.timer = 0;
                 S.timeUp = true;
                 float a = S.p1.hp / S.p1.maxHp, b = S.p2.hp / S.p2.maxHp;
-                S.roundWinner = (a > b) ? 1 : (b > a ? 2 : 0);
+                S.roundWinner = pcode::NguoiThang(a, b, (a > b) ? 1 : (b > a ? 2 : 0));   // Bài 14
                 S.phase = Phase::RoundOver; S.phaseTime = 0;
             }
         }
-        if (ko1 || ko2) {
+        // Bài 2: hàm KetThucHiep của người chơi quyết định khi nào hết hiệp
+        bool over = pcode::KetThucHiep((int)std::ceil(S.p1.hp), (int)std::ceil(S.p2.hp), ko1 || ko2);
+        if (over && S.phase == Phase::Fight) {
+            ko1 = ko1 || S.p1.hp <= 0;
+            ko2 = ko2 || S.p2.hp <= 0;
             S.roundWinner = ko2 && !ko1 ? 1 : (ko1 && !ko2 ? 2 : 0);
             S.phase = Phase::RoundOver; S.phaseTime = 0;
         }
@@ -897,7 +956,7 @@ static void DrawHpBar(const Fighter& f, float trail, bool left, float s) {
     float W = (float)GetScreenWidth();
     float bw = W * 0.36f, bh = 22 * s, y = 22 * s;
     float x = left ? 24 * s : W - 24 * s - bw;
-    float pct = f.hp / f.maxHp;
+    float pct = Clamp01(pcode::TiLeMau((int)std::ceil(f.hp), (int)f.maxHp, f.hp / f.maxHp));   // Bài 1: code người chơi
     DrawRectangleRec({ x - 3, y - 3, bw + 6, bh + 6 }, Color{ 0, 0, 0, 160 });
     DrawRectangleRec({ x, y, bw, bh }, Color{ 60, 20, 24, 255 });
     float tw = bw * trail, pw = bw * pct;
@@ -940,11 +999,13 @@ static void DrawSelectOverlay() {
     ui::TextCentered("CHỌN VÕ SĨ", W / 2, 26 * s, 40 * s, pal::accent, FS_BOLD);
     ui::TextCentered("A/D hoặc ← → để chọn,  Enter để vào trận", W / 2, 76 * s, 18 * s, pal::dim);
 
-    float cw = 250 * s, ch = 150 * s, gap = 20 * s;
-    float total = cw * 3 + gap * 2;
+    int n = CharCount();
+    float gap = 20 * s;
+    float cw = std::min(250 * s, (W - 60 * s - gap * (n - 1)) / n), ch = 150 * s;
+    float total = cw * n + gap * (n - 1);
     float x0 = (W - total) / 2, y = H - ch - (Has(F_ROUNDS) ? 120 : 64) * s;
-    for (int i = 1; i <= 3; ++i) {
-        const CharStats& cs = GetCharacterStats((CharType)i);
+    for (int i = 1; i <= n; ++i) {
+        const CharStats& cs = GetCharacterStats(SelType(i));
         Rectangle r = { x0 + (i - 1) * (cw + gap), y, cw, ch };
         bool sel = S.selChar == i;
         ui::Panel(r, Fade(pal::panel, 0.92f), sel ? pal::accent : pal::line, 0.08f);
@@ -988,7 +1049,7 @@ static void DrawMatchOver() {
     DrawRectangle(0, 0, (int)W, (int)H, Color{ 0, 0, 0, 140 });
     bool win = S.p1.roundsWon > S.p2.roundsWon;
     bool draw = S.p1.roundsWon == S.p2.roundsWon;
-    float pw = 560 * s, ph = (Has(F_COMBO) ? 400 : 220) * s;
+    float pw = 560 * s, ph = (Has(F_COMBO) ? 426 : 220) * s;
     Rectangle r = { (W - pw) / 2, (H - ph) / 2, pw, ph };
     ui::Panel(r, pal::panel, win ? pal::accent : pal::line, 0.05f);
     std::string title = draw ? "HÒA!" : (win ? "BẠN THẮNG!" : "BẠN THUA RỒI");
@@ -1011,6 +1072,16 @@ static void DrawMatchOver() {
             ui::Text(TextFormat("%d", get(S.p2)), r.x + 420 * s, y, 17 * s, pal::text, FS_MONO);
             y += 26 * s;
         }
+        // Bài 7: DonManhNhat() của người chơi
+        auto strongest = [](const Fighter& f) {
+            int m = 0;
+            for (int d : f.hits) m = std::max(m, d);
+            return pcode::DonManhNhat(f.hits, m);
+        };
+        ui::Text("Đòn mạnh nhất", r.x + 30 * s, y, 17 * s, pal::text);
+        ui::Text(TextFormat("%d", strongest(S.p1)), r.x + 300 * s, y, 17 * s, pal::text, FS_MONO);
+        ui::Text(TextFormat("%d", strongest(S.p2)), r.x + 420 * s, y, 17 * s, pal::text, FS_MONO);
+        y += 26 * s;
         ui::Text("Combo cao nhất", r.x + 30 * s, y, 17 * s, pal::text);
         ui::Text(TextFormat("%d", S.p1.bestCombo), r.x + 300 * s, y, 17 * s, pal::accent, FS_MONO);
         ui::Text(TextFormat("%d", S.p2.bestCombo), r.x + 420 * s, y, 17 * s, pal::text, FS_MONO);
@@ -1055,6 +1126,15 @@ void arena::DrawHUD() {
     if (Has(F_HPBAR)) {
         DrawHpBar(S.p1, S.trail1, true, s);
         DrawHpBar(S.p2, S.trail2, false, s);
+        // Bài 2: SoDonDeKO() của người chơi: còn bao nhiêu cú đấm nữa?
+        if (pcode::Active(F_ARENA) && Has(F_PUNCH) && S.p2.hp > 0 && S.phase == Phase::Fight) {
+            int punch = (int)GetCharacterStats(S.p1.type).punch;
+            int n = pcode::SoDonDeKO((int)std::ceil(S.p2.hp), punch, -1);
+            if (n >= 0) {
+                std::string t = TextFormat("SoDonDeKO() = %d cú đấm", n);
+                ui::TextShadow(t, W - 24 * s - ui::Measure(t, 15 * s, FS_BOLD).x, 84 * s, 15 * s, pal::accent2);
+            }
+        }
     } else {
         ui::Text("(Chưa có thanh máu: học Bài 1)", 24 * s, 24 * s, 18 * s, pal::dim);
     }
@@ -1083,6 +1163,16 @@ void arena::DrawHUD() {
             std::string w = S.roundWinner == 1 ? "Bạn thắng hiệp này" : (S.roundWinner == 2 ? "Đối thủ thắng hiệp này" : "Hòa");
             DrawBigText(w, 30, pal::text, 0.45f);
         }
+    }
+
+    // Huy hiệu: game đang chạy bao nhiêu hàm do người chơi viết
+    if (pcode::ActiveCount() > 0) {
+        std::string b = TextFormat("</> Game đang chạy %d hàm do BẠN viết", pcode::ActiveCount());
+        Vector2 m = ui::Measure(b, 15 * s, FS_BOLD);
+        Rectangle r = { 16 * s, H - 78 * s, m.x + 24 * s, 30 * s };
+        DrawRectangleRounded(r, 0.4f, 6, Color{ 10, 40, 24, 210 });
+        DrawRectangleRoundedLinesEx(r, 0.4f, 6, 1.5f, pal::good);
+        ui::Text(b, r.x + 12 * s, r.y + 6 * s, 15 * s, pal::good, FS_BOLD);
     }
 
     // Thanh hướng dẫn dưới cùng

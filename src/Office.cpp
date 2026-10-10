@@ -3,6 +3,7 @@
 #include "Common.h"
 #include "Gfx.h"
 #include "Lessons.h"
+#include "PlayerCode.h"
 #include "UI.h"
 #include "raymath.h"
 #include "rlgl.h"
@@ -107,12 +108,24 @@ static void RenderScreens() {
     if (!O.screenOk) return;
     const auto& lessons = GetLessons();
     int idx = std::min(g_progress.completed, (int)lessons.size() - 1);
-    const std::string& code = lessons[idx].pages[0].code;
+    // Màn hình hiện code của CHÍNH BẠN (nếu đã viết), nếu chưa thì code mẫu của bài
+    static std::string cached;
+    static int cachedIdx = -1;
+    static float reload = 0;
+    reload -= GetFrameTime();
+    int codeIdx = std::max(0, std::min(g_progress.completed - 1, (int)lessons.size() - 1));
+    if (codeIdx != cachedIdx || reload <= 0) {
+        cachedIdx = codeIdx;
+        reload = 2.0f;
+        cached = (g_progress.completed > 0 && pcode::HasSaved(codeIdx)) ? pcode::LoadSource(codeIdx) : lessons[idx].pages[0].code;
+    }
+    const std::string& code = cached;
 
     BeginTextureMode(O.screen);
     ClearBackground(Color{ 14, 16, 24, 255 });
     DrawRectangle(0, 0, 640, 30, Color{ 32, 36, 50, 255 });
-    ui::Text(lessons[idx].file, 12, 6, 18, pal::dim, FS_MONO);
+    ui::Text((g_progress.completed > 0 && pcode::HasSaved(codeIdx)) ? TextFormat("code/bai_%02d (code của bạn)", codeIdx + 1) : lessons[idx].file.c_str(),
+             12, 6, 18, pal::dim, FS_MONO);
     DrawCircle(600, 15, 6, pal::bad);
     DrawCircle(580, 15, 6, pal::accent);
     DrawCircle(560, 15, 6, pal::good);

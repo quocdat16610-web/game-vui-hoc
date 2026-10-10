@@ -35,6 +35,14 @@ uniform float     shadowTexel;     // 1 / độ phân giải shadow map
 
 out vec4 finalColor;
 
+// Độ sáng khuếch tán (Lambert). Ở Bài 15 bạn sẽ tự viết hàm này trong game!
+//@@ANH_SANG_BEGIN
+float AnhSang(vec3 N, vec3 L)
+{
+    return max(dot(N, L), 0.0);
+}
+//@@ANH_SANG_END
+
 // Trả về 1.0 nếu được chiếu sáng hoàn toàn, 0.0 nếu nằm trong bóng
 float ShadowFactor(vec3 n, vec3 L)
 {
@@ -67,7 +75,7 @@ void main()
     vec3 ambient = mix(groundColor, skyColor, n.y * 0.5 + 0.5);
 
     // 2. Mặt trời: Lambert (khuếch tán) + Blinn-Phong (bóng loáng)
-    float ndl = max(dot(n, L), 0.0);
+    float ndl = clamp(AnhSang(n, L), 0.0, 1.5);
     float sh = (useShadow == 1) ? ShadowFactor(n, L) : 1.0;
     vec3 h = normalize(L + v);
     float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.35 * ndl;

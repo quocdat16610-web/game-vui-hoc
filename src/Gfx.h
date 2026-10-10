@@ -6,6 +6,7 @@
 #pragma once
 #include "raylib.h"
 #include <functional>
+#include <string>
 
 namespace gfx {
     enum Quality { Q_LOW = 0, Q_MEDIUM = 1, Q_HIGH = 2 };
@@ -69,6 +70,10 @@ namespace gfx {
     void BeginScene();
     void EndScene();
     void PresentScene();
+
+    // Bài 15: thay hàm AnhSang() trong shader bằng code GLSL của người chơi
+    bool TestDiffuse(const std::string& glslFunction, std::string& error);
+    bool SetDiffuse(const std::string& glslFunction);   // chuỗi rỗng = dùng mặc định
 
     // Hiệu ứng tức thời cho khung hình kế tiếp
     void SetAberration(float a);

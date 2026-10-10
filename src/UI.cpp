@@ -165,6 +165,59 @@ namespace {
     const Color C_FUNC    = { 240, 214, 120, 255 };
 }
 
+void ui::CodeLine(const std::string& l, float x, float y, float size) {
+    size_t i = 0;
+    auto put = [&](const std::string& s, Color c) {
+        Text(s, x, y, size, c, FS_MONO);
+        x += Measure(s, size, FS_MONO).x + size * 0.02f;
+    };
+    // Dòng tiền xử lý (#include ...)
+    size_t first = l.find_first_not_of(' ');
+    if (first != std::string::npos && l[first] == '#') {
+        size_t cpos = l.find("//");
+        put(l.substr(0, cpos), C_PRE);
+        if (cpos != std::string::npos) put(l.substr(cpos), C_COMMENT);
+        return;
+    }
+    while (i < l.size()) {
+        char ch = l[i];
+        if (ch == '/' && i + 1 < l.size() && (l[i + 1] == '/' || l[i + 1] == '*')) { put(l.substr(i), C_COMMENT); break; }
+        if (ch == '"' || ch == '\'') {
+            size_t j = i + 1;
+            while (j < l.size() && l[j] != ch) { if (l[j] == '\\') j++; j++; }
+            put(l.substr(i, j - i + 1), C_STR);
+            i = j + 1;
+            continue;
+        }
+        if (isdigit((unsigned char)ch)) {
+            size_t j = i;
+            while (j < l.size() && (isalnum((unsigned char)l[j]) || l[j] == '.')) j++;
+            put(l.substr(i, j - i), C_NUM);
+            i = j;
+            continue;
+        }
+        if (isalpha((unsigned char)ch) || ch == '_') {
+            size_t j = i;
+            while (j < l.size() && (isalnum((unsigned char)l[j]) || l[j] == '_')) j++;
+            std::string w = l.substr(i, j - i);
+            Color c = C_TEXT;
+            if (Keywords().count(w)) c = C_KW;
+            else if (isupper((unsigned char)w[0])) c = C_TYPE;
+            else if (j < l.size() && l[j] == '(') c = C_FUNC;
+            else if (w == "vector" || w == "string" || w == "map" || w == "unique_ptr" ||
+                     w == "cout" || w == "endl" || w == "make_unique" || w == "size_t") c = C_TYPE;
+            put(w, c);
+            i = j;
+            continue;
+        }
+        size_t j = i + 1;
+        while (j < l.size() && !isalnum((unsigned char)l[j]) && l[j] != '_' && l[j] != '"' &&
+               l[j] != '\'' && !(l[j] == '/' && j + 1 < l.size() && (l[j + 1] == '/' || l[j + 1] == '*'))) j++;
+        put(l.substr(i, j - i), C_TEXT);
+        i = j;
+    }
+}
+
 float ui::Code(const std::string& code, Rectangle box, float size, bool draw) {
     std::vector<std::string> lines = SplitLines(code);
     // Thu nhỏ chữ nếu có dòng quá dài so với khung
@@ -190,59 +243,7 @@ float ui::Code(const std::string& code, Rectangle box, float size, bool draw) {
     int lineNo = 1;
     for (const std::string& l : lines) {
         Text(TextFormat("%2d", lineNo++), box.x + pad * 0.6f, y, size, Color{ 80, 88, 110, 255 }, FS_MONO);
-        float x = box.x + pad + gutter;
-        size_t i = 0;
-        auto put = [&](const std::string& s, Color c) {
-            Text(s, x, y, size, c, FS_MONO);
-            x += Measure(s, size, FS_MONO).x + size * 0.02f;
-        };
-        // Dòng tiền xử lý (#include ...)
-        size_t first = l.find_first_not_of(' ');
-        if (first != std::string::npos && l[first] == '#') {
-            size_t cpos = l.find("//");
-            put(l.substr(0, cpos), C_PRE);
-            if (cpos != std::string::npos) put(l.substr(cpos), C_COMMENT);
-            y += lh;
-            continue;
-        }
-        while (i < l.size()) {
-            char ch = l[i];
-            if (ch == '/' && i + 1 < l.size() && l[i + 1] == '/') { put(l.substr(i), C_COMMENT); break; }
-            if (ch == '"' || ch == '\'') {
-                size_t j = i + 1;
-                while (j < l.size() && l[j] != ch) { if (l[j] == '\\') j++; j++; }
-                put(l.substr(i, j - i + 1), C_STR);
-                i = j + 1;
-                continue;
-            }
-            if (isdigit((unsigned char)ch)) {
-                size_t j = i;
-                while (j < l.size() && (isalnum((unsigned char)l[j]) || l[j] == '.')) j++;
-                put(l.substr(i, j - i), C_NUM);
-                i = j;
-                continue;
-            }
-            if (isalpha((unsigned char)ch) || ch == '_') {
-                size_t j = i;
-                while (j < l.size() && (isalnum((unsigned char)l[j]) || l[j] == '_')) j++;
-                std::string w = l.substr(i, j - i);
-                Color c = C_TEXT;
-                if (Keywords().count(w)) c = C_KW;
-                else if (isupper((unsigned char)w[0])) c = C_TYPE;               // tên kiểu tự đặt: Fighter, Vector3...
-                else if (j < l.size() && l[j] == '(') c = C_FUNC;               // gọi hàm
-                else if (w == "vector" || w == "string" || w == "map" || w == "unique_ptr" ||
-                         w == "cout" || w == "endl" || w == "make_unique" || w == "size_t") c = C_TYPE;
-                put(w, c);
-                i = j;
-                continue;
-            }
-            // Ký tự khác: gom cho tới khi gặp ký tự "đặc biệt"
-            size_t j = i + 1;
-            while (j < l.size() && !isalnum((unsigned char)l[j]) && l[j] != '_' && l[j] != '"' &&
-                   l[j] != '\'' && !(l[j] == '/' && j + 1 < l.size() && l[j + 1] == '/')) j++;
-            put(l.substr(i, j - i), C_TEXT);
-            i = j;
-        }
+        CodeLine(l, box.x + pad + gutter, y, size);
         y += lh;
     }
     return h;

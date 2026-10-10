@@ -13,6 +13,7 @@
 #include "LessonScreen.h"
 #include "Lessons.h"
 #include "Office.h"
+#include "PlayerCode.h"
 #include "UI.h"
 #include <algorithm>
 #include <cmath>
@@ -75,6 +76,7 @@ int main(int argc, char** argv) {
     sfx::Init();
     arena::Init();
     office::Init();
+    pcode::LoadAll();             // nạp code người chơi đã viết (thư mục code/)
 
     Screen screen = Screen::Title;
     float time = 0;
@@ -95,12 +97,16 @@ int main(int argc, char** argv) {
             toast = std::string("Đồ họa: ") + gfx::QualityName();
             toastTime = 2.0f;
         }
-        if (IsKeyPressed(KEY_M)) {
+        if (IsKeyPressed(KEY_M) && !lessonscreen::WantsTextInput()) {
             sfx::ToggleMute();
             toast = sfx::Muted() ? "Âm thanh: TẮT" : "Âm thanh: BẬT";
             toastTime = 2.0f;
         }
         toastTime -= dt;
+        {
+            std::string err = pcode::TakeError();          // code người chơi lỗi khi chạy
+            if (!err.empty()) { toast = err; toastTime = 7.0f; }
+        }
 
         // ---------------- 1. UPDATE ----------------
         switch (screen) {
@@ -190,10 +196,11 @@ int main(int argc, char** argv) {
         }
         if (toastTime > 0) {
             float s = ui::S();
-            Vector2 m = ui::Measure(toast, 18 * s, FS_BOLD);
-            Rectangle r = { GetScreenWidth() - m.x - 44 * s, 60 * s, m.x + 28 * s, 38 * s };
-            ui::Panel(r, Fade(pal::bg, 0.92f), pal::accent, 0.3f);
-            ui::Text(toast, r.x + 14 * s, r.y + 9 * s, 18 * s, pal::text, FS_BOLD);
+            float tw = std::min(ui::Measure(toast, 17 * s, FS_REGULAR).x, 620 * s);
+            float th = ui::Wrapped(toast, { 0, 0, tw, 0 }, 17 * s, pal::text, false);
+            Rectangle r = { GetScreenWidth() - tw - 44 * s, 60 * s, tw + 28 * s, th + 18 * s };
+            ui::Panel(r, Fade(pal::bg, 0.94f), pal::accent, 0.12f);
+            ui::Wrapped(toast, { r.x + 14 * s, r.y + 9 * s, tw, 0 }, 17 * s, pal::text);
         }
         EndDrawing();
     }

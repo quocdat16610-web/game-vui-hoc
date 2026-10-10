@@ -39,6 +39,7 @@ namespace ui {
 
     // Vẽ khối code C++ có tô màu cú pháp. Trả về chiều cao.
     float Code(const std::string& code, Rectangle box, float size, bool draw = true);
+    void  CodeLine(const std::string& line, float x, float y, float size);   // 1 dòng code tô màu
 
     bool  Button(Rectangle r, const std::string& label, bool enabled = true, Color accent = pal::accent);
     bool  Hover(Rectangle r);

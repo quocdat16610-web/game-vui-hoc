@@ -185,6 +185,23 @@ void sfx::Play(Id id, float pitchVariation, float volume) {
     PlaySound(s);
 }
 
+void sfx::SetCustomPunch(const std::vector<float>& samples, int sampleRate) {
+    if (!g_ready || samples.empty()) return;
+    std::vector<int16_t> pcm(samples.size());
+    for (size_t i = 0; i < samples.size(); ++i) {
+        float v = std::isfinite(samples[i]) ? std::tanh(samples[i]) : 0.0f;
+        pcm[i] = (int16_t)(v * 30000.0f);
+    }
+    Wave w = {};
+    w.frameCount = (unsigned int)pcm.size();
+    w.sampleRate = (unsigned int)sampleRate;
+    w.sampleSize = 16;
+    w.channels = 1;
+    w.data = pcm.data();
+    UnloadSound(g_sounds[PUNCH]);
+    g_sounds[PUNCH] = LoadSoundFromWave(w);
+}
+
 void sfx::Update(bool wantMusic) {
     if (!g_ready) return;
     bool on = wantMusic && !g_muted;

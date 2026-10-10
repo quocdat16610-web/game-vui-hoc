@@ -2,6 +2,8 @@
 #include "raymath.h"
 #include "rlgl.h"
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <initializer_list>
 #include <map>
 #include <vector>
@@ -126,30 +128,91 @@ namespace {
 }
 
 // =============================================================================
-void gfx::Init() {
-    G.lit = LoadShader("assets/shaders/lit.vs", "assets/shaders/lit.fs");
-    G.litOk = ShaderOk(G.lit);
-    if (G.litOk) {
-        Shader& s = G.lit;
-        G.L.viewPos = GetShaderLocation(s, "viewPos");
-        G.L.sunDir = GetShaderLocation(s, "sunDir");
-        G.L.sunColor = GetShaderLocation(s, "sunColor");
-        G.L.sky = GetShaderLocation(s, "skyColor");
-        G.L.ground = GetShaderLocation(s, "groundColor");
-        G.L.fogColor = GetShaderLocation(s, "fogColor");
-        G.L.fogRange = GetShaderLocation(s, "fogRange");
-        G.L.exposure = GetShaderLocation(s, "exposure");
-        G.L.lightCount = GetShaderLocation(s, "lightCount");
-        G.L.lightPos = GetShaderLocation(s, "lightPos");
-        G.L.lightColor = GetShaderLocation(s, "lightColor");
-        G.L.lightRange = GetShaderLocation(s, "lightRange");
-        G.L.useShadow = GetShaderLocation(s, "useShadow");
-        G.L.lightVP = GetShaderLocation(s, "lightVP");
-        G.L.shadowMap = GetShaderLocation(s, "shadowMap");
-        G.L.shadowTexel = GetShaderLocation(s, "shadowTexel");
-    } else {
-        TraceLog(LOG_WARNING, "GFX: khong nap duoc shader anh sang, dung do hoa don gian");
+// ---- Nạp shader ánh sáng, có thể thay hàm AnhSang() bằng code người chơi ----
+static std::string g_vsText, g_fsText;
+static std::string g_captured;
+
+static void CaptureLog(int level, const char* text, va_list args) {
+    char buf[1024];
+    vsnprintf(buf, sizeof(buf), text, args);
+    if (level >= LOG_WARNING) { g_captured += buf; g_captured += "\n"; }
+}
+
+// Bỏ chú thích và ký tự không phải ASCII (GLSL không chấp nhận)
+static std::string CleanGlsl(const std::string& src) {
+    std::string out;
+    for (size_t i = 0; i < src.size(); ++i) {
+        if (src.compare(i, 2, "//") == 0) { while (i < src.size() && src[i] != '\n') i++; out += '\n'; continue; }
+        if (src.compare(i, 2, "/*") == 0) { size_t e = src.find("*/", i + 2); i = (e == std::string::npos) ? src.size() : e + 1; continue; }
+        if ((unsigned char)src[i] < 0x80) out += src[i];
     }
+    return out;
+}
+
+static std::string BuildFs(const std::string& fn) {
+    if (fn.empty()) return g_fsText;
+    size_t a = g_fsText.find("//@@ANH_SANG_BEGIN"), b = g_fsText.find("//@@ANH_SANG_END");
+    if (a == std::string::npos || b == std::string::npos) return g_fsText;
+    return g_fsText.substr(0, a) + CleanGlsl(fn) + "\n" + g_fsText.substr(b);
+}
+
+static Shader CompileLit(const std::string& fn, std::string* err) {
+    g_captured.clear();
+    SetTraceLogCallback(CaptureLog);
+    std::string fs = BuildFs(fn);
+    Shader s = LoadShaderFromMemory(g_vsText.c_str(), fs.c_str());
+    SetTraceLogCallback(nullptr);
+    if (!ShaderOk(s) && err) {
+        *err = "GPU báo lỗi biên dịch shader:\n" + g_captured;
+        if (err->size() > 600) err->resize(600);
+    }
+    return s;
+}
+
+static void UseLit(Shader s) {
+    if (G.litOk) UnloadShader(G.lit);
+    G.lit = s;
+    G.litOk = ShaderOk(s);
+    if (!G.litOk) return;
+    G.L.viewPos = GetShaderLocation(s, "viewPos");
+    G.L.sunDir = GetShaderLocation(s, "sunDir");
+    G.L.sunColor = GetShaderLocation(s, "sunColor");
+    G.L.sky = GetShaderLocation(s, "skyColor");
+    G.L.ground = GetShaderLocation(s, "groundColor");
+    G.L.fogColor = GetShaderLocation(s, "fogColor");
+    G.L.fogRange = GetShaderLocation(s, "fogRange");
+    G.L.exposure = GetShaderLocation(s, "exposure");
+    G.L.lightCount = GetShaderLocation(s, "lightCount");
+    G.L.lightPos = GetShaderLocation(s, "lightPos");
+    G.L.lightColor = GetShaderLocation(s, "lightColor");
+    G.L.lightRange = GetShaderLocation(s, "lightRange");
+    G.L.useShadow = GetShaderLocation(s, "useShadow");
+    G.L.lightVP = GetShaderLocation(s, "lightVP");
+    G.L.shadowMap = GetShaderLocation(s, "shadowMap");
+    G.L.shadowTexel = GetShaderLocation(s, "shadowTexel");
+}
+
+bool gfx::TestDiffuse(const std::string& fn, std::string& error) {
+    if (g_fsText.empty()) { error = "không tìm thấy assets/shaders/lit.fs"; return false; }
+    Shader s = CompileLit(fn, &error);
+    bool ok = ShaderOk(s);
+    if (ok) UnloadShader(s);
+    return ok;
+}
+
+bool gfx::SetDiffuse(const std::string& fn) {
+    if (g_fsText.empty()) return false;
+    Shader s = CompileLit(fn, nullptr);
+    if (!ShaderOk(s)) return false;
+    UseLit(s);
+    return true;
+}
+
+void gfx::Init() {
+    if (char* vs = LoadFileText("assets/shaders/lit.vs")) { g_vsText = vs; UnloadFileText(vs); }
+    if (char* fs = LoadFileText("assets/shaders/lit.fs")) { g_fsText = fs; UnloadFileText(fs); }
+    if (!g_vsText.empty() && !g_fsText.empty()) UseLit(CompileLit("", nullptr));
+    if (!G.litOk) TraceLog(LOG_WARNING, "GFX: khong nap duoc shader anh sang, dung do hoa don gian");
 
     G.bright = LoadShader(0, "assets/shaders/post_bright.fs");
     G.blur = LoadShader(0, "assets/shaders/post_blur.fs");

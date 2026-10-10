@@ -7,11 +7,12 @@
 #include "raylib.h"
 #include <map>
 #include <string>
+#include <vector>
 
 // Trạng thái của võ sĩ — một máy trạng thái hữu hạn (Bài 10)
 enum class FState { Idle, Walk, Punch, Kick, Block, Hurt, KO, Victory };
 
-enum class CharType { Dev, Ninja, Samurai, Robot, Dummy };
+enum class CharType { Dev, Ninja, Samurai, Robot, Dummy, Custom };
 
 struct CharStats {
     const char* name;
@@ -49,6 +50,7 @@ struct Fighter {
     float    walkPhase = 0;
     int      roundsWon = 0;
     std::map<std::string, int> stats;   // thống kê trận (Bài 7)
+    std::vector<int> hits;               // sát thương từng đòn trúng
 
     void ChangeState(FState s) { state = s; stateTime = 0; hitDone = false; }
 };

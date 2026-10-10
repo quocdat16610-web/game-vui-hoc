@@ -213,6 +213,11 @@ void DrawFighterModel(const Fighter& f, bool animate, float time) {
             gfx::Sphere({ 0.18f, 1.91f, 0.07f }, 0.026f, Color{ 20, 20, 24, 255 }, 4, 6);
             gfx::Sphere({ 0.18f, 1.91f, -0.07f }, 0.026f, Color{ 20, 20, 24, 255 }, 4, 6);
         }
+        if (f.type == CharType::Custom) {                                                 // võ sĩ của bạn: mũ lưỡi trai "coder"
+            gfx::Sphere({ -0.01f, 1.95f, 0 }, 0.195f, acc, 7, 12);
+            gfx::Box({ 0.17f, 1.99f, 0 }, { 0.2f, 0.035f, 0.3f }, acc);
+            gfx::Box({ -0.06f, 2.12f, 0 }, { 0.08f, 0.03f, 0.08f }, body);
+        }
         if (f.type == CharType::Ninja) {
             gfx::Box({ 0.03f, 1.8f, 0 }, { 0.36f, 0.14f, 0.42f }, body);                // khăn che mặt
             gfx::Sphere({ -0.03f, 1.96f, 0 }, 0.185f, body, 7, 12);                      // mũ trùm

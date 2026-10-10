@@ -1,7 +1,10 @@
 #include "LessonScreen.h"
 #include "Audio.h"
+#include "Challenges.h"
+#include "CodeEditor.h"
 #include "Common.h"
 #include "Lessons.h"
+#include "PlayerCode.h"
 #include "UI.h"
 #include <algorithm>
 #include <cmath>
@@ -15,6 +18,19 @@ namespace {
         bool missed = false;      // đã từng trả lời sai
     };
 
+    // Bước "Thử thách code": người chơi tự viết hàm
+    struct CodeState {
+        bool loaded = false, passed = false, ran = false;
+        bool solutionShown = false, confirmSolution = false;
+        int fails = 0, hintIdx = -1;
+        CodeEditor editor;
+        std::vector<TestResult> results;
+        std::vector<mcpp::Error> errors;
+        std::string console;
+        float leftScroll = 0, leftMax = 0;
+        float resultFlash = 0;
+    };
+
     struct ScreenState {
         int lesson = 0;
         int step = 0;
@@ -26,27 +42,82 @@ namespace {
         std::string message;
         bool close = false;
         float time = 0;
+        CodeState code;
     };
     ScreenState S;
 
     const Lesson& Cur() { return GetLessons()[S.lesson]; }
     int PageCount() { return (int)Cur().pages.size(); }
     int QuizCount() { return (int)Cur().quiz.size(); }
-    int StepCount() { return 1 + PageCount() + QuizCount() + 1; }
+    int StepCount() { return 1 + PageCount() + QuizCount() + 2; }
+    bool IsCodeStep(int st) { return st == PageCount() + QuizCount() + 1; }
     bool IsQuizStep(int st) { return st > PageCount() && st <= PageCount() + QuizCount(); }
     int QuizIndex(int st) { return st - PageCount() - 1; }
     bool IsResultStep(int st) { return st == StepCount() - 1; }
+}
+
+// Bố cục màn hình (dùng chung cho Update và Draw)
+struct Layout { Rectangle win, sb, main, bar, left, editor, output; };
+
+static Layout ComputeLayout() {
+    float s = ui::S();
+    float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+    Layout L;
+    float m = 20 * s;
+    L.win = { m, m, W - 2 * m, H - 2 * m };
+    float sbW = IsCodeStep(S.step) ? 0.0f : std::min(280 * s, L.win.width * 0.3f);   // thử thách code: ẩn thanh bên cho rộng
+    L.sb = { L.win.x + 2, L.win.y + 38 * s, sbW, L.win.height - 40 * s };
+    L.main = { L.sb.x + L.sb.width + 1, L.sb.y, L.win.x + L.win.width - (L.sb.x + L.sb.width) - 3, L.sb.height };
+    float barH = 64 * s;
+    L.bar = { L.main.x, L.main.y + L.main.height - barH, L.main.width, barH };
+    Rectangle area = { L.main.x + 14 * s, L.main.y + 44 * s, L.main.width - 28 * s, L.main.height - 44 * s - barH - 10 * s };
+    L.left = { area.x, area.y, area.width * 0.36f, area.height };
+    float rx = L.left.x + L.left.width + 14 * s, rw = area.x + area.width - rx;
+    L.editor = { rx, area.y, rw, area.height * 0.64f };
+    L.output = { rx, L.editor.y + L.editor.height + 10 * s, rw, area.height - L.editor.height - 10 * s };
+    return L;
+}
+
+static void EnsureCodeLoaded() {
+    if (S.code.loaded) return;
+    S.code.loaded = true;
+    S.code.editor.SetText(pcode::LoadSource(S.lesson));
+    S.code.editor.Focus(true);
+}
+
+static void RunCode() {
+    CodeState& c = S.code;
+    std::string src = c.editor.Text();
+    pcode::SaveSource(S.lesson, src);
+    bool ok = RunChallenge(S.lesson, src, c.errors, c.results, c.console);
+    c.ran = true;
+    c.resultFlash = 1.0f;
+    c.leftScroll = 0;
+    int errLine = 0;
+    if (!c.errors.empty()) errLine = c.errors[0].line;
+    else for (const TestResult& r : c.results) if (!r.pass && r.line > 0) { errLine = r.line; break; }
+    c.editor.SetErrorLine(errLine);
+    if (ok) {
+        c.passed = true;
+        sfx::Play(sfx::CORRECT, 0);
+        if (S.lesson < g_progress.completed) pcode::Activate(S.lesson, src);   // bài đã học: cập nhật game ngay
+    } else {
+        c.fails++;
+        sfx::Play(sfx::WRONG, 0);
+    }
 }
 
 static void Finish() {
     int missed = 0;
     for (auto& q : S.quiz) missed += q.missed ? 1 : 0;
     S.earnedStars = missed == 0 ? 3 : (missed == 1 ? 2 : 1);
+    if (S.code.solutionShown) S.earnedStars = 1;                 // xem lời giải: chỉ được 1 sao
     g_progress.stars[S.lesson] = std::max(g_progress.stars[S.lesson], S.earnedStars);
     S.newlyUnlocked = false;
     if (S.lesson == g_progress.completed) {
         g_progress.completed++;
         S.newlyUnlocked = true;
+        pcode::Activate(S.lesson, S.code.editor.Text());          // từ giờ game chạy code của bạn!
         sfx::Play(sfx::UNLOCK, 0);
     }
     g_progress.Save();
@@ -64,6 +135,8 @@ void lessonscreen::Open(int idx) {
     }
 }
 
+bool lessonscreen::WantsTextInput() { return IsCodeStep(S.step) && S.code.editor.Focused(); }
+
 std::string lessonscreen::TakeMessage() {
     std::string m = S.message;
     S.message.clear();
@@ -73,14 +146,17 @@ std::string lessonscreen::TakeMessage() {
 static bool CanGoNext() {
     if (IsResultStep(S.step)) return false;
     if (IsQuizStep(S.step)) return S.quiz[QuizIndex(S.step)].solved;
+    if (IsCodeStep(S.step)) return S.code.passed || S.lesson < g_progress.completed;
     return true;
 }
 
 static void GoTo(int st) {
     st = std::clamp(st, 0, StepCount() - 1);
     if (st == S.step) return;
+    if (IsCodeStep(S.step) && S.code.loaded) pcode::SaveSource(S.lesson, S.code.editor.Text());
     S.step = st;
     S.scroll = 0;
+    if (IsCodeStep(S.step)) EnsureCodeLoaded();
     if (IsResultStep(S.step) && !S.finished) Finish();
 }
 
@@ -94,12 +170,13 @@ static void Pick(int orderPos) {
 }
 
 static void CloseScreen() {
+    if (S.code.loaded) pcode::SaveSource(S.lesson, S.code.editor.Text());
     if (S.finished && S.newlyUnlocked) {
         if (g_progress.completed >= F_COUNT)
             S.message = "XONG! \"Code Võ Đài\" đã hoàn chỉnh: hiệp đấu, AI, camera, hiệu ứng... Ra võ đài đánh một trận ăn mừng nào! "
                         "Sau đó thử đọc toàn bộ mã nguồn trong thư mục src/ nhé.";
         else
-            S.message = "Tuyệt! Mình vừa code xong \"" + Cur().unlock + "\". " + Cur().unlockHow;
+            S.message = "Tuyệt! Game đang chạy CHÍNH CODE BẠN VIẾT cho \"" + Cur().unlock + "\". " + Cur().unlockHow;
     }
     S.close = true;
 }
@@ -107,6 +184,30 @@ static void CloseScreen() {
 bool lessonscreen::Update(float dt) {
     S.time += dt;
     if (S.close) return true;
+
+    if (IsCodeStep(S.step)) {
+        CodeState& c = S.code;
+        c.resultFlash = std::max(0.0f, c.resultFlash - dt * 2);
+        Layout L = ComputeLayout();
+        bool ctrl = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL);
+        if (IsKeyPressed(KEY_F5) || (ctrl && (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_R)))) { RunCode(); return false; }
+        if (c.editor.Focused()) {
+            if (IsKeyPressed(KEY_ESCAPE)) c.editor.Focus(false);    // Esc: thoát khỏi ô soạn thảo
+            else c.editor.Update(L.editor);
+            if (c.editor.TakeChanged()) c.editor.SetErrorLine(0);
+            return false;
+        }
+        c.editor.Update(L.editor);                                 // để bấm chuột vào ô code
+        if (ui::Hover(L.left)) {
+            c.leftScroll -= GetMouseWheelMove() * 50.0f * ui::S();
+            c.leftScroll = std::clamp(c.leftScroll, 0.0f, std::max(0.0f, c.leftMax));
+        }
+        if (IsKeyPressed(KEY_ESCAPE)) { CloseScreen(); return true; }
+        if (IsKeyPressed(KEY_LEFT) && !c.editor.Focused()) GoTo(S.step - 1);
+        if (IsKeyPressed(KEY_RIGHT) && CanGoNext()) GoTo(S.step + 1);
+        return S.close;
+    }
+
     if (IsKeyPressed(KEY_ESCAPE)) { CloseScreen(); return true; }
 
     S.scroll -= GetMouseWheelMove() * 50.0f * ui::S();
@@ -265,13 +366,118 @@ static float DrawResult(Rectangle c, float s) {
     return y - c.y;
 }
 
+// -----------------------------------------------------------------------------
+//  Bước thử thách code: đề bài + test bên trái, trình soạn thảo + kết quả bên phải
+// -----------------------------------------------------------------------------
+static void DrawCodeStep(const Layout& LO, float s) {
+    CodeState& cs = S.code;
+    const Challenge& ch = GetChallenge(S.lesson);
+
+    // ---- Cột trái: đề bài + danh sách test ----
+    Rectangle L = LO.left;
+    BeginScissorMode((int)L.x, (int)L.y, (int)L.width, (int)L.height);
+    float y = L.y - cs.leftScroll;
+    ui::Text(TextFormat("THỬ THÁCH CODE  ·  BÀI %d", S.lesson + 1), L.x, y, 14 * s, pal::accent, FS_BOLD);
+    y += 24 * s;
+    y += ui::Wrapped(ch.title, { L.x, y, L.width - 10 * s, 0 }, 17 * s, pal::accent2, true) + 8 * s;
+    y += ui::Wrapped(ch.task, { L.x, y, L.width - 10 * s, 0 }, 15.5f * s, pal::text) + 10 * s;
+
+    ui::Text("KIỂM TRA TỰ ĐỘNG", L.x, y, 13 * s, pal::dim, FS_BOLD);
+    y += 22 * s;
+    if (!cs.ran) {
+        y += ui::Wrapped("Bấm ▶ Chạy thử (F5) để chấm code. Game sẽ gọi hàm của bạn với nhiều bộ dữ liệu và so sánh kết quả.",
+                         { L.x, y, L.width - 10 * s, 0 }, 14 * s, pal::dim) + 8 * s;
+    } else if (!cs.errors.empty()) {
+        y += ui::Wrapped("Code chưa biên dịch được nên chưa chạy test.", { L.x, y, L.width - 10 * s, 0 }, 14 * s, pal::bad) + 8 * s;
+    } else {
+        for (const TestResult& r : cs.results) {
+            Color c = r.pass ? pal::good : pal::bad;
+            ui::Text(r.pass ? "✓" : "✗", L.x, y, 16 * s, c, FS_BOLD);
+            y += ui::Wrapped(r.name, { L.x + 20 * s, y, L.width - 30 * s, 0 }, 14 * s, pal::text) + 1 * s;
+            if (!r.pass || r.detail.size() < 40)
+                y += ui::Wrapped(r.detail, { L.x + 20 * s, y, L.width - 30 * s, 0 }, 13 * s, r.pass ? pal::dim : Color{ 255, 190, 190, 255 }) + 6 * s;
+        }
+    }
+    y += 6 * s;
+    y += ui::Wrapped("> Game dùng hàm này cho: " + ch.usedIn, { L.x, y, L.width - 10 * s, 0 }, 14 * s, pal::text) + 8 * s;
+    EndScissorMode();
+    cs.leftMax = (y + cs.leftScroll) - (L.y + L.height) + 20 * s;
+
+    // ---- Trình soạn thảo ----
+    cs.editor.Draw(LO.editor);
+
+    // ---- Khung kết quả ----
+    Rectangle O = LO.output;
+    Color border = !cs.ran ? pal::line : (cs.passed && cs.errors.empty() ? pal::good : pal::bad);
+    if (cs.resultFlash > 0) border = Lerp(border, WHITE, cs.resultFlash * 0.5f);
+    ui::Panel(O, pal::panel, border, 0.04f);
+    BeginScissorMode((int)O.x, (int)O.y, (int)O.width, (int)O.height);
+    float oy = O.y + 10 * s;
+    Rectangle tb = { O.x + 14 * s, 0, O.width - 28 * s, 0 };
+    if (cs.hintIdx >= 0) {
+        tb.y = oy;
+        oy += ui::Wrapped(TextFormat("> Gợi ý %d/%d: %s", cs.hintIdx + 1, (int)ch.hints.size(), ch.hints[cs.hintIdx].c_str()), tb, 14 * s, pal::text) + 6 * s;
+    }
+    if (!cs.ran) {
+        tb.y = oy;
+        ui::Wrapped("Kết quả chạy sẽ hiện ở đây.\nPhím tắt: F5 chạy · Ctrl+Z hoàn tác · Ctrl+/ chú thích · Tab thụt lề · Esc rời ô code",
+                    tb, 14 * s, pal::dim);
+    } else if (!cs.errors.empty()) {
+        const mcpp::Error& e = cs.errors[0];
+        ui::Text("LỖI BIÊN DỊCH", tb.x, oy, 15 * s, pal::bad, FS_BOLD);
+        oy += 24 * s;
+        tb.y = oy;
+        oy += ui::Wrapped(TextFormat("Dòng %d: %s", e.line, e.msg.c_str()), tb, 15 * s, Color{ 255, 200, 200, 255 }) + 6 * s;
+    } else {
+        int pass = 0;
+        for (const TestResult& r : cs.results) pass += r.pass ? 1 : 0;
+        bool all = pass == (int)cs.results.size();
+        ui::Text(all ? TextFormat("ĐÚNG HẾT %d/%d TEST!", pass, (int)cs.results.size())
+                     : TextFormat("ĐÚNG %d/%d TEST", pass, (int)cs.results.size()),
+                 tb.x, oy, 17 * s, all ? pal::good : pal::accent, FS_BOLD);
+        oy += 28 * s;
+        tb.y = oy;
+        if (all) oy += ui::Wrapped(S.lesson < g_progress.completed
+                                       ? "Game đã cập nhật: từ giờ dùng phiên bản code mới này của bạn."
+                                       : "Tuyệt vời! Bấm \"Tiếp →\" để hoàn thành bài: tính năng mới sẽ chạy bằng chính code này.",
+                                   tb, 14 * s, pal::text) + 6 * s;
+        else oy += ui::Wrapped("Xem các dòng ✗ bên trái để biết test nào sai, sửa code rồi chạy lại.", tb, 14 * s, pal::text) + 6 * s;
+    }
+    if (!cs.console.empty()) {
+        ui::Text("std::cout:", tb.x, oy, 13 * s, pal::dim, FS_BOLD);
+        oy += 20 * s;
+        tb.y = oy;
+        ui::Wrapped(cs.console, tb, 13 * s, pal::text);
+    }
+    EndScissorMode();
+
+    // ---- Hộp xác nhận xem lời giải ----
+    if (cs.confirmSolution) {
+        float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
+        DrawRectangle(0, 0, (int)W, (int)H, Color{ 0, 0, 0, 150 });
+        Rectangle r = { W / 2 - 260 * s, H / 2 - 100 * s, 520 * s, 200 * s };
+        ui::Panel(r, pal::panel, pal::purple, 0.06f);
+        ui::TextCentered("Xem lời giải mẫu?", W / 2, r.y + 20 * s, 22 * s, pal::text, FS_BOLD);
+        ui::Wrapped("Code của bạn sẽ bị thay bằng lời giải và bài này chỉ được 1 sao. Hãy đọc kỹ, hiểu rồi tự gõ lại ở bài sau nhé!",
+                    { r.x + 24 * s, r.y + 60 * s, r.width - 48 * s, 0 }, 15 * s, pal::dim);
+        if (ui::Button({ r.x + 24 * s, r.y + r.height - 60 * s, 220 * s, 42 * s }, "Thôi, tự làm tiếp", true, pal::accent2))
+            cs.confirmSolution = false;
+        if (ui::Button({ r.x + r.width - 244 * s, r.y + r.height - 60 * s, 220 * s, 42 * s }, "Xem lời giải", true, pal::purple)) {
+            cs.confirmSolution = false;
+            cs.solutionShown = true;
+            cs.editor.SetText(ch.solution);
+            cs.editor.Focus(true);
+        }
+    }
+}
+
 void lessonscreen::Draw() {
     float s = ui::S();
     float W = (float)GetScreenWidth(), H = (float)GetScreenHeight();
     DrawRectangle(0, 0, (int)W, (int)H, Color{ 0, 0, 0, 170 });
 
-    float m = 20 * s;
-    Rectangle win = { m, m, W - 2 * m, H - 2 * m };
+    Layout LO = ComputeLayout();
+    Rectangle win = LO.win;
     ui::Panel(win, pal::bg, pal::line, 0.015f);
 
     // Thanh tiêu đề
@@ -279,11 +485,12 @@ void lessonscreen::Draw() {
     DrawCircle((int)(win.x + 20 * s), (int)(win.y + 20 * s), 6 * s, pal::bad);
     DrawCircle((int)(win.x + 40 * s), (int)(win.y + 20 * s), 6 * s, pal::accent);
     DrawCircle((int)(win.x + 60 * s), (int)(win.y + 20 * s), 6 * s, pal::good);
-    ui::TextCentered(TextFormat("DevStudio++  —  %s", Cur().file.c_str()), win.x + win.width / 2, win.y + 9 * s, 16 * s, pal::dim, FS_MONO);
+    std::string fileTitle = IsCodeStep(S.step) ? FileNameForLesson(S.lesson) : Cur().file;
+    ui::TextCentered(TextFormat("DevStudio++  —  %s", fileTitle.c_str()), win.x + win.width / 2, win.y + 9 * s, 16 * s, pal::dim, FS_MONO);
 
     // Thanh bên: danh sách bài học
-    float sbW = std::min(280 * s, win.width * 0.3f);
-    Rectangle sb = { win.x + 2, win.y + 38 * s, sbW, win.height - 40 * s };
+    Rectangle sb = LO.sb;
+    if (sb.width > 0) {
     DrawRectangleRec(sb, pal::panel);
     ui::Text("BÀI HỌC", sb.x + 16 * s, sb.y + 12 * s, 14 * s, pal::dim, FS_BOLD);
     const auto& L = GetLessons();
@@ -314,9 +521,10 @@ void lessonscreen::Draw() {
         for (int k = 0; k < g_progress.stars[i]; ++k)
             ui::Star({ r.x + r.width - 34 * s + k * 11 * s, r.y + r.height / 2 }, 5.5f * s, pal::accent);
     }
+    }
 
     // Vùng nội dung chính
-    Rectangle main = { sb.x + sb.width + 1, sb.y, win.x + win.width - (sb.x + sb.width) - 3, sb.height };
+    Rectangle main = LO.main;
     // Các "tab" bước
     float tabY = main.y + 8 * s;
     float tx = main.x + 16 * s;
@@ -325,6 +533,7 @@ void lessonscreen::Draw() {
         if (st == 0) label = "câu_chuyện.txt";
         else if (st <= PageCount()) label = TextFormat("phần_%d.cpp", st);
         else if (IsResultStep(st)) label = "kết_quả";
+        else if (IsCodeStep(st)) label = "thử_thách.cpp";
         else label = TextFormat("quiz_%d", QuizIndex(st) + 1);
         float tw = ui::Measure(label, 13 * s, FS_MONO).x + 20 * s;
         if (tx + tw > main.x + main.width - 10 * s) break;
@@ -342,6 +551,9 @@ void lessonscreen::Draw() {
     Rectangle content = { main.x + 36 * s, main.y + 54 * s, std::min(main.width - 72 * s, 900 * s), main.height - 54 * s - barH };
     content.x = main.x + (main.width - content.width) / 2;
 
+    if (IsCodeStep(S.step)) {
+        DrawCodeStep(LO, s);
+    } else {
     BeginScissorMode((int)main.x, (int)content.y - 4, (int)main.width, (int)content.height + 4);
     Rectangle c = { content.x, content.y + 10 * s - S.scroll, content.width, 0 };
     float h;
@@ -357,6 +569,7 @@ void lessonscreen::Draw() {
         float ty = content.y + (trackH - thumbH) * (S.scroll / S.maxScroll);
         DrawRectangleRounded({ main.x + main.width - 10 * s, ty, 5 * s, thumbH }, 1, 4, pal::line);
     }
+    }
 
     // Thanh nút dưới cùng
     Rectangle bar = { main.x, main.y + main.height - barH, main.width, barH };
@@ -367,8 +580,23 @@ void lessonscreen::Draw() {
     if (IsResultStep(S.step)) {
         if (ui::Button({ bar.x + bar.width - bw - 16 * s, by, bw, bh }, "Về văn phòng", true, pal::good)) CloseScreen();
     } else {
-        std::string nextLabel = (S.step == PageCount()) ? "Làm thử thách →" : "Tiếp →";
+        std::string nextLabel = (S.step == PageCount()) ? "Làm quiz →" : (IsCodeStep(S.step + 1) ? "Viết code →" : "Tiếp →");
         if (ui::Button({ bar.x + bar.width - bw - 16 * s, by, bw, bh }, nextLabel, CanGoNext())) GoTo(S.step + 1);
+    }
+    if (IsCodeStep(S.step)) {                    // các nút của thử thách code
+        CodeState& cs = S.code;
+        float x = bar.x + 180 * s;
+        if (ui::Button({ x, by, 200 * s, bh }, "▶ Chạy thử (F5)", true, pal::good)) RunCode();
+        x += 210 * s;
+        const Challenge& ch = GetChallenge(S.lesson);
+        if (ui::Button({ x, by, 130 * s, bh }, "Gợi ý", !ch.hints.empty(), pal::accent2))
+            cs.hintIdx = (cs.hintIdx + 1) % (int)ch.hints.size();
+        x += 140 * s;
+        bool canSol = cs.fails >= 2 || S.lesson < g_progress.completed;
+        if (x + 150 * s < bar.x + bar.width - bw * 2 - 40 * s &&
+            ui::Button({ x, by, 150 * s, bh }, "Lời giải", canSol, pal::purple))
+            cs.confirmSolution = true;
+        return;
     }
     // Chấm tiến độ
     float dotsW = StepCount() * 16 * s;

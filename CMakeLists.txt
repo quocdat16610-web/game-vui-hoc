@@ -37,6 +37,10 @@ add_executable(CodeVoDai
     src/FighterModel.cpp
     src/Gfx.cpp
     src/Audio.cpp
+    src/MiniCpp.cpp
+    src/Challenges.cpp
+    src/PlayerCode.cpp
+    src/CodeEditor.cpp
 )
 target_link_libraries(CodeVoDai PRIVATE raylib)
 

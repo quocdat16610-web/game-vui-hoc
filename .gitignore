@@ -8,3 +8,5 @@ cmake-build-*/
 *.o
 *.obj
 save.txt
+
+code/
