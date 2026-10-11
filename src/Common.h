@@ -28,7 +28,7 @@ enum Feature {
     F_COUNT
 };
 
-enum class Screen { Title, Office, Lesson, Arena };
+enum class Screen { Title, World, Office, Lesson, Arena };
 
 // Tiến độ người chơi, lưu ra file save.txt
 struct Progress {

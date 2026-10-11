@@ -35,6 +35,9 @@ struct Fighter {
     CharType type = CharType::Dev;
     bool     isPlayer = false;
     bool     casual = false;      // tư thế đi lại bình thường (dùng trong văn phòng)
+    int      modelSlot = -1;      // >= 0: vẽ bằng model 3D có xương (KayKit), < 0: khối hình tự dựng
+    int      moveDir = 0;         // hướng đang đi (-1, 0, 1) để chọn hoạt ảnh đi tới / đi lùi
+    float    showcaseYaw = 999;   // != 999: quay model theo góc này (màn chọn võ sĩ)
     Vector3  pos = { 0, 0, 0 };
     Vector3  vel = { 0, 0, 0 };
     float    facing = 1;          // +1 nhìn sang phải, -1 nhìn sang trái
@@ -57,6 +60,8 @@ struct Fighter {
 
 // Vẽ model võ sĩ dựng từ các khối hộp. animate = bật hoạt ảnh tay chân.
 void DrawFighterModel(const Fighter& f, bool animate, float time);
+// Cập nhật hoạt ảnh của model 3D (gọi 1 lần mỗi frame cho võ sĩ có modelSlot >= 0)
+void UpdateFighterModel(const Fighter& f, bool animate, float dt);
 
 namespace arena {
     void Init();

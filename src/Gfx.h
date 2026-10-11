@@ -60,6 +60,8 @@ namespace gfx {
     // Bật shader ánh sáng (gọi trong BeginMode3D)
     void BeginLit(const Camera3D& cam);
     void EndLit();
+    // Vẽ một mesh của model glTF với ánh sáng (emissive > 0: phát sáng trắng)
+    void DrawMeshLit(const Mesh& mesh, Material& mat, const Matrix& transform, float emissive = 0);
 
     // Vẽ vật phát sáng / trong suốt cộng màu (tia đèn, hạt...)
     void BeginGlow();

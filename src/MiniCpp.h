@@ -14,6 +14,7 @@
 //              --(Interpreter)--> chạy từng nút của cây
 // =============================================================================
 #pragma once
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -117,6 +118,12 @@ public:
     static Slot NewVector(Kind elemKind);
 
     std::string& Output() { return output_; }               // nội dung std::cout
+
+    // Game "cắm" thêm hàm và hằng số cho code người chơi (ví dụ API xây dựng thế giới)
+    using NativeFn = std::function<Value(std::vector<Value>& args, int line)>;
+    void RegisterFunction(const std::string& name, NativeFn fn) { natives_[name] = std::move(fn); }
+    void DefineConstant(const std::string& name, long long v) { constants_[name] = v; }
+    bool HasNative(const std::string& name) const { return natives_.count(name) > 0; }
     void SetStepLimit(long long n) { stepLimit_ = n; }
 
     struct Impl;
@@ -125,6 +132,8 @@ private:
     std::unique_ptr<Impl> impl_;
     std::string output_;
     long long stepLimit_ = 400000;
+    std::map<std::string, NativeFn> natives_;
+    std::map<std::string, long long> constants_;
 };
 
 } // namespace mcpp

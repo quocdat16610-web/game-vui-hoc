@@ -21,6 +21,7 @@ uniform vec3  groundColor;     // ánh sáng môi trường dội từ dưới �
 uniform vec3  fogColor;
 uniform vec2  fogRange;        // (bắt đầu, kết thúc)
 uniform float exposure;
+uniform vec3  emissive;        // cộng thêm màu tự phát sáng (nháy trắng khi trúng đòn)
 
 #define MAX_LIGHTS 8
 uniform int   lightCount;
@@ -101,6 +102,8 @@ void main()
     // 5. Sương mù theo khoảng cách
     float f = clamp((length(viewPos - fragPosition) - fogRange.x) / (fogRange.y - fogRange.x), 0.0, 1.0);
     color = mix(color, pow(fogColor, vec3(2.2)), f);
+
+    color += emissive;
 
     // 6. Tone mapping (ACES gần đúng) rồi đổi lại sRGB
     color *= exposure;

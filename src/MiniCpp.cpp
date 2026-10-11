@@ -233,6 +233,7 @@ struct Frame {
 };
 
 struct Program::Impl {
+    friend class Program;
     Program* P = nullptr;
     std::map<std::string, std::shared_ptr<FuncDef>> funcs;
     std::vector<StmtP> globalDecls;
@@ -1053,6 +1054,8 @@ Slot Program::Impl::Lookup(const std::string& name, int line) {
     if (g != globals.end()) return g->second;
     auto en = enumConsts.find(name);
     if (en != enumConsts.end()) { auto s = std::make_shared<Value>(Value::Int(en->second)); s->readonly = true; return s; }
+    auto pc = P->constants_.find(name);
+    if (pc != P->constants_.end()) { auto s = std::make_shared<Value>(Value::Int(pc->second)); s->readonly = true; return s; }
     if (name == "PI" || name == "M_PI") { auto s = std::make_shared<Value>(Value::Float(3.14159265358979)); s->readonly = true; return s; }
     if (name == "cout") { auto s = std::make_shared<Value>(); s->kind = Kind::Cout; return s; }
     if (name == "endl") { auto s = std::make_shared<Value>(); s->kind = Kind::Str; s->s = "\n"; return s; }
@@ -1222,6 +1225,8 @@ Value Program::Impl::Eval(const ExprP& e) {
         if (f != funcs.end()) return Invoke(*f->second, {}, &e->a, nullptr, e->line);
         std::vector<Value> args;
         for (const ExprP& x : e->a) args.push_back(Eval(x));
+        auto nat = P->natives_.find(e->name);
+        if (nat != P->natives_.end()) { Step(e->line); return nat->second(args, e->line); }
         bool found = false;
         Value r = CallBuiltin(e->name, args, e->line, found);
         if (!found) throw Err(e->line, "không tìm thấy hàm '" + e->name + "'");

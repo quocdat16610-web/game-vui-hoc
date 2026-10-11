@@ -7,7 +7,7 @@
 #include <string>
 
 namespace office {
-    enum class Action { None, OpenComputer, EnterArena };
+    enum class Action { None, OpenComputer, EnterArena, ExitToWorld };
 
     void   Init();
     void   Shutdown();
@@ -17,4 +17,5 @@ namespace office {
     void   DrawHUD(bool titleMode);
     void   Say(const std::string& msg, float seconds = 6.0f);   // lời thoại của anh dev
     bool   ModalOpen();
+    void   SpawnAtDoor();                     // đặt anh dev ở cửa ra vào (khi bước vào từ ngoài đảo)
 }

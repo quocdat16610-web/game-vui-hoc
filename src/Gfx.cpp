@@ -22,6 +22,10 @@ namespace {
         Shader lit = {};
         bool litOk = false;
         LitLocs L = {};
+        Shader mesh = {};                  // cùng fragment shader, vertex shader dùng matModel
+        bool meshOk = false;
+        LitLocs M = {};
+        int locEmissive = -1;
 
         RenderTexture2D shadow = {};
         int shadowRes = 0;
@@ -129,7 +133,7 @@ namespace {
 
 // =============================================================================
 // ---- Nạp shader ánh sáng, có thể thay hàm AnhSang() bằng code người chơi ----
-static std::string g_vsText, g_fsText;
+static std::string g_vsText, g_fsText, g_meshVsText, g_diffuse;
 static std::string g_captured;
 
 static void CaptureLog(int level, const char* text, va_list args) {
@@ -169,27 +173,41 @@ static Shader CompileLit(const std::string& fn, std::string* err) {
     return s;
 }
 
+static void FetchLocs(Shader s, LitLocs& L) {
+    L.viewPos = GetShaderLocation(s, "viewPos");
+    L.sunDir = GetShaderLocation(s, "sunDir");
+    L.sunColor = GetShaderLocation(s, "sunColor");
+    L.sky = GetShaderLocation(s, "skyColor");
+    L.ground = GetShaderLocation(s, "groundColor");
+    L.fogColor = GetShaderLocation(s, "fogColor");
+    L.fogRange = GetShaderLocation(s, "fogRange");
+    L.exposure = GetShaderLocation(s, "exposure");
+    L.lightCount = GetShaderLocation(s, "lightCount");
+    L.lightPos = GetShaderLocation(s, "lightPos");
+    L.lightColor = GetShaderLocation(s, "lightColor");
+    L.lightRange = GetShaderLocation(s, "lightRange");
+    L.useShadow = GetShaderLocation(s, "useShadow");
+    L.lightVP = GetShaderLocation(s, "lightVP");
+    L.shadowMap = GetShaderLocation(s, "shadowMap");
+    L.shadowTexel = GetShaderLocation(s, "shadowTexel");
+}
+
 static void UseLit(Shader s) {
     if (G.litOk) UnloadShader(G.lit);
     G.lit = s;
     G.litOk = ShaderOk(s);
-    if (!G.litOk) return;
-    G.L.viewPos = GetShaderLocation(s, "viewPos");
-    G.L.sunDir = GetShaderLocation(s, "sunDir");
-    G.L.sunColor = GetShaderLocation(s, "sunColor");
-    G.L.sky = GetShaderLocation(s, "skyColor");
-    G.L.ground = GetShaderLocation(s, "groundColor");
-    G.L.fogColor = GetShaderLocation(s, "fogColor");
-    G.L.fogRange = GetShaderLocation(s, "fogRange");
-    G.L.exposure = GetShaderLocation(s, "exposure");
-    G.L.lightCount = GetShaderLocation(s, "lightCount");
-    G.L.lightPos = GetShaderLocation(s, "lightPos");
-    G.L.lightColor = GetShaderLocation(s, "lightColor");
-    G.L.lightRange = GetShaderLocation(s, "lightRange");
-    G.L.useShadow = GetShaderLocation(s, "useShadow");
-    G.L.lightVP = GetShaderLocation(s, "lightVP");
-    G.L.shadowMap = GetShaderLocation(s, "shadowMap");
-    G.L.shadowTexel = GetShaderLocation(s, "shadowTexel");
+    if (G.litOk) FetchLocs(s, G.L);
+    // Shader cho model glTF: cùng phần tính ánh sáng (kể cả hàm AnhSang của người chơi)
+    if (G.meshOk) UnloadShader(G.mesh);
+    G.meshOk = false;
+    if (G.litOk && !g_meshVsText.empty()) {
+        G.mesh = LoadShaderFromMemory(g_meshVsText.c_str(), BuildFs(g_diffuse).c_str());
+        G.meshOk = ShaderOk(G.mesh);
+        if (G.meshOk) {
+            FetchLocs(G.mesh, G.M);
+            G.locEmissive = GetShaderLocation(G.mesh, "emissive");
+        }
+    }
 }
 
 bool gfx::TestDiffuse(const std::string& fn, std::string& error) {
@@ -204,6 +222,7 @@ bool gfx::SetDiffuse(const std::string& fn) {
     if (g_fsText.empty()) return false;
     Shader s = CompileLit(fn, nullptr);
     if (!ShaderOk(s)) return false;
+    g_diffuse = fn;
     UseLit(s);
     return true;
 }
@@ -211,6 +230,7 @@ bool gfx::SetDiffuse(const std::string& fn) {
 void gfx::Init() {
     if (char* vs = LoadFileText("assets/shaders/lit.vs")) { g_vsText = vs; UnloadFileText(vs); }
     if (char* fs = LoadFileText("assets/shaders/lit.fs")) { g_fsText = fs; UnloadFileText(fs); }
+    if (char* mv = LoadFileText("assets/shaders/lit_mesh.vs")) { g_meshVsText = mv; UnloadFileText(mv); }
     if (!g_vsText.empty() && !g_fsText.empty()) UseLit(CompileLit("", nullptr));
     if (!G.litOk) TraceLog(LOG_WARNING, "GFX: khong nap duoc shader anh sang, dung do hoa don gian");
 
@@ -238,6 +258,7 @@ void gfx::Shutdown() {
     UnloadShadowTarget();
     UnloadPostTargets();
     if (G.litOk) UnloadShader(G.lit);
+    if (G.meshOk) UnloadShader(G.mesh);
     if (G.postOk) { UnloadShader(G.bright); UnloadShader(G.blur); UnloadShader(G.fin); }
 }
 
@@ -362,23 +383,21 @@ void gfx::RenderShadowMap(const std::function<void()>& drawCasters) {
 // =============================================================================
 //  Shader ánh sáng
 // =============================================================================
-void gfx::BeginLit(const Camera3D& cam) {
-    if (!G.litOk) return;
-    Shader& s = G.lit;
-    const Environment& e = G.env;
+static void Upload(Shader s, const LitLocs& L, const Camera3D& cam) {
+    const gfx::Environment& e = G.env;
     Vector3 sd = Vector3Normalize(e.sunDir);
     Vector3 sc = ToVec3(e.sunColor, e.sunIntensity);
     Vector3 sky = ToVec3(e.sky, e.ambient), gr = ToVec3(e.ground, e.ambient);
     Vector3 fog = ToVec3(e.fog, 1.0f);
     float fogR[2] = { e.fogNear, e.fogFar };
-    SetShaderValue(s, G.L.viewPos, &cam.position, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.sunDir, &sd, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.sunColor, &sc, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.sky, &sky, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.ground, &gr, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.fogColor, &fog, SHADER_UNIFORM_VEC3);
-    SetShaderValue(s, G.L.fogRange, fogR, SHADER_UNIFORM_VEC2);
-    SetShaderValue(s, G.L.exposure, &e.exposure, SHADER_UNIFORM_FLOAT);
+    SetShaderValue(s, L.viewPos, &cam.position, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.sunDir, &sd, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.sunColor, &sc, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.sky, &sky, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.ground, &gr, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.fogColor, &fog, SHADER_UNIFORM_VEC3);
+    SetShaderValue(s, L.fogRange, fogR, SHADER_UNIFORM_VEC2);
+    SetShaderValue(s, L.exposure, &e.exposure, SHADER_UNIFORM_FLOAT);
 
     Vector3 lp[8], lcol[8];
     float lr[8];
@@ -388,27 +407,53 @@ void gfx::BeginLit(const Camera3D& cam) {
         lcol[i] = ToVec3(e.lights[i].color, e.lights[i].intensity);
         lr[i] = e.lights[i].range;
     }
-    SetShaderValue(s, G.L.lightCount, &n, SHADER_UNIFORM_INT);
+    SetShaderValue(s, L.lightCount, &n, SHADER_UNIFORM_INT);
     if (n > 0) {
-        SetShaderValueV(s, G.L.lightPos, lp, SHADER_UNIFORM_VEC3, n);
-        SetShaderValueV(s, G.L.lightColor, lcol, SHADER_UNIFORM_VEC3, n);
-        SetShaderValueV(s, G.L.lightRange, lr, SHADER_UNIFORM_FLOAT, n);
+        SetShaderValueV(s, L.lightPos, lp, SHADER_UNIFORM_VEC3, n);
+        SetShaderValueV(s, L.lightColor, lcol, SHADER_UNIFORM_VEC3, n);
+        SetShaderValueV(s, L.lightRange, lr, SHADER_UNIFORM_FLOAT, n);
     }
-
     int useShadow = G.shadowValid ? 1 : 0;
-    SetShaderValue(s, G.L.useShadow, &useShadow, SHADER_UNIFORM_INT);
+    SetShaderValue(s, L.useShadow, &useShadow, SHADER_UNIFORM_INT);
     if (useShadow) {
         float texel = 1.0f / G.shadowRes;
-        SetShaderValueMatrix(s, G.L.lightVP, G.lightVP);
-        SetShaderValue(s, G.L.shadowTexel, &texel, SHADER_UNIFORM_FLOAT);
+        SetShaderValueMatrix(s, L.lightVP, G.lightVP);
+        SetShaderValue(s, L.shadowTexel, &texel, SHADER_UNIFORM_FLOAT);
         rlEnableShader(s.id);
         int slot = SHADOW_SLOT;
         rlActiveTextureSlot(SHADOW_SLOT);
         rlEnableTexture(G.shadow.depth.id);
-        rlSetUniform(G.L.shadowMap, &slot, SHADER_UNIFORM_INT, 1);
+        rlSetUniform(L.shadowMap, &slot, SHADER_UNIFORM_INT, 1);
         rlActiveTextureSlot(0);
     }
-    BeginShaderMode(s);
+}
+
+void gfx::BeginLit(const Camera3D& cam) {
+    if (!G.litOk) return;
+    Upload(G.lit, G.L, cam);
+    if (G.meshOk) {
+        Upload(G.mesh, G.M, cam);
+        Vector3 zero = { 0, 0, 0 };
+        SetShaderValue(G.mesh, G.locEmissive, &zero, SHADER_UNIFORM_VEC3);
+    }
+    BeginShaderMode(G.lit);
+}
+
+void gfx::DrawMeshLit(const Mesh& mesh, Material& mat, const Matrix& transform, float emissive) {
+    Shader old = mat.shader;
+    if (G.meshOk) {
+        mat.shader = G.mesh;
+        if (emissive > 0) {
+            Vector3 e = { emissive, emissive, emissive };
+            SetShaderValue(G.mesh, G.locEmissive, &e, SHADER_UNIFORM_VEC3);
+        }
+    }
+    DrawMesh(mesh, mat, transform);
+    if (G.meshOk && emissive > 0) {
+        Vector3 zero = { 0, 0, 0 };
+        SetShaderValue(G.mesh, G.locEmissive, &zero, SHADER_UNIFORM_VEC3);
+    }
+    mat.shader = old;
 }
 
 void gfx::EndLit() {

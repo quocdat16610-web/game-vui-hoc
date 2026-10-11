@@ -18,8 +18,9 @@ namespace {
     const Vector3 ARENA_POS  = {  3.8f, 0, -1.2f };
     const Vector3 SHELF_POS  = { -7.55f, 0, 1.6f };
     const Vector3 COFFEE_POS = {  6.9f, 0, -5.2f };
+    const Vector3 DOOR_POS   = {  0.0f, 0, 5.4f };      // cửa ra đảo (cạnh phía camera)
 
-    enum class Zone { None, Computer, Arena, Shelf, Coffee };
+    enum class Zone { None, Computer, Arena, Shelf, Coffee, Door };
 
     struct OfficeState {
         Fighter dev;                 // dùng lại model võ sĩ, nhưng ở tư thế đi lại
@@ -57,6 +58,7 @@ namespace {
 }
 
 static bool Has(Feature f) { return g_progress.Has(f); }
+static void MiniFighters(Fighter& f1, Fighter& f2);
 
 static Color Darken(Color c, float k = 0.6f) {
     return Color{ (unsigned char)(c.r * k), (unsigned char)(c.g * k), (unsigned char)(c.b * k), c.a };
@@ -75,6 +77,7 @@ void office::Init() {
     O.dev = Fighter{};
     O.dev.type = CharType::Dev;
     O.dev.casual = true;
+    O.dev.modelSlot = 4;
     O.dev.pos = { -1.0f, 0, 1.5f };
     O.yaw = -90;
     O.screen = LoadRenderTexture(640, 400);
@@ -165,7 +168,8 @@ office::Action office::Update(float dt, bool titleMode) {
         O.cam.up = { 0, 1, 0 };
         O.cam.fovy = 50;
         O.cam.projection = CAMERA_PERSPECTIVE;
-        O.dev.ChangeState(FState::Idle);
+        if (O.dev.state != FState::Idle) O.dev.ChangeState(FState::Idle);
+        UpdateFighterModel(O.dev, true, dt);
         return Action::None;
     }
 
@@ -214,12 +218,22 @@ office::Action office::Update(float dt, bool titleMode) {
     O.cam.fovy = 45;
     O.cam.projection = CAMERA_PERSPECTIVE;
 
+    // Cập nhật hoạt ảnh model 3D
+    UpdateFighterModel(O.dev, true, dt);
+    if (Has(F_ARENA)) {
+        Fighter f1, f2;
+        MiniFighters(f1, f2);
+        UpdateFighterModel(f1, Has(F_ANIM_STATES), dt);
+        UpdateFighterModel(f2, Has(F_ANIM_STATES), dt);
+    }
+
     // Vùng tương tác
     O.zone = Zone::None;
     if (DistXZ(d.pos, { DESK_POS.x, 0, DESK_POS.z + 1.3f }) < 1.5f) O.zone = Zone::Computer;
     else if (DistXZ(d.pos, ARENA_POS) < 2.9f) O.zone = Zone::Arena;
     else if (DistXZ(d.pos, SHELF_POS) < 1.9f) O.zone = Zone::Shelf;
     else if (DistXZ(d.pos, COFFEE_POS) < 1.8f) O.zone = Zone::Coffee;
+    else if (DistXZ(d.pos, DOOR_POS) < 1.4f) O.zone = Zone::Door;
 
     if (IsKeyPressed(KEY_E) || IsKeyPressed(KEY_ENTER)) {
         switch (O.zone) {
@@ -231,6 +245,7 @@ office::Action office::Update(float dt, bool titleMode) {
                     : "Chưa có game loop thì chưa chạy được võ đài. Học xong Bài 2 nhé!");
             break;
         case Zone::Shelf: O.roadmap = true; break;
+        case Zone::Door: return Action::ExitToWorld;
         case Zone::Coffee: {
             int n = sizeof(TIPS) / sizeof(TIPS[0]);
             Say(std::string("*nhấp một ngụm cà phê* ") + TIPS[O.tipIndex % n], 7);
@@ -257,6 +272,7 @@ static void DrawRoom() {
     DrawCube({ -2.4f, 0.01f, 1.2f }, 5.0f, 0.02f, 3.2f, Color{ 62, 84, 120, 255 });
     DrawCube({ -2.4f, 0.015f, 1.2f }, 4.6f, 0.02f, 2.8f, Color{ 74, 100, 142, 255 });
     // Tường sau & tường trái
+    Part({ DOOR_POS.x, 0.02f, DOOR_POS.z + 0.1f }, { 2.0f, 0.04f, 1.1f }, Color{ 150, 60, 50, 255 });   // thảm chùi chân ở cửa
     Part({ 0, 2.0f, -ROOM_Z - 0.1f }, { ROOM_X * 2, 4.0f, 0.2f }, Color{ 214, 206, 190, 255 });
     Part({ -ROOM_X - 0.1f, 2.0f, 0 }, { 0.2f, 4.0f, ROOM_Z * 2 }, Color{ 200, 192, 176, 255 });
     DrawCube({ 0, 0.12f, -ROOM_Z + 0.02f }, ROOM_X * 2, 0.24f, 0.05f, Color{ 120, 90, 64, 255 });
@@ -340,6 +356,23 @@ static void DrawRoom() {
     }
 }
 
+// Hai võ sĩ mini đang tập trên bục — hiển thị đúng những gì bạn đã code!
+static void MiniFighters(Fighter& f1, Fighter& f2) {
+    f1.type = Has(F_CHARSELECT) ? CharType::Ninja : CharType::Dev;
+    f2.type = Has(F_AI) ? (Has(F_CHARSELECT) ? CharType::Robot : CharType::Dev) : CharType::Dummy;
+    f1.pos = { -0.75f, 0, 0 }; f1.facing = 1;
+    f2.pos = { 0.75f, 0, 0 };  f2.facing = -1;
+    float cyc = std::fmod(O.time, 2.4f);
+    if (Has(F_PUNCH) && cyc < 0.35f) { f1.state = FState::Punch; f1.stateTime = cyc; }
+    if (Has(F_KICK_BLOCK) && cyc >= 0.8f && cyc < 1.35f) { f1.state = FState::Kick; f1.stateTime = cyc - 0.8f; }
+    if (Has(F_PUNCH) && (cyc < 0.15f || (cyc >= 0.98f && cyc < 1.1f))) f2.flash = 0.8f;
+    if (Has(F_AI) && cyc >= 1.6f && cyc < 1.95f) { f2.state = FState::Punch; f2.stateTime = cyc - 1.6f; }
+    if (Has(F_KICK_BLOCK) && Has(F_AI) && cyc >= 1.6f && cyc < 2.0f) f1.state = FState::Block;
+
+    f1.modelSlot = 2;
+    f2.modelSlot = 3;
+}
+
 static void DrawArenaPad() {
     Vector3 a = ARENA_POS;
     Cyl(a, 2.0f, 2.1f, 0.2f, 24, Color{ 40, 44, 60, 255 });
@@ -357,19 +390,8 @@ static void DrawArenaPad() {
         return;
     }
 
-    // Hai võ sĩ mini đang tập — hiển thị đúng những gì bạn đã code!
     Fighter f1, f2;
-    f1.type = Has(F_CHARSELECT) ? CharType::Ninja : CharType::Dev;
-    f2.type = Has(F_AI) ? (Has(F_CHARSELECT) ? CharType::Robot : CharType::Dev) : CharType::Dummy;
-    f1.pos = { -0.75f, 0, 0 }; f1.facing = 1;
-    f2.pos = { 0.75f, 0, 0 };  f2.facing = -1;
-    float cyc = std::fmod(O.time, 2.4f);
-    if (Has(F_PUNCH) && cyc < 0.35f) { f1.state = FState::Punch; f1.stateTime = cyc; }
-    if (Has(F_KICK_BLOCK) && cyc >= 0.8f && cyc < 1.35f) { f1.state = FState::Kick; f1.stateTime = cyc - 0.8f; }
-    if (Has(F_PUNCH) && (cyc < 0.15f || (cyc >= 0.98f && cyc < 1.1f))) f2.flash = 0.8f;
-    if (Has(F_AI) && cyc >= 1.6f && cyc < 1.95f) { f2.state = FState::Punch; f2.stateTime = cyc - 1.6f; }
-    if (Has(F_KICK_BLOCK) && Has(F_AI) && cyc >= 1.6f && cyc < 2.0f) f1.state = FState::Block;
-
+    MiniFighters(f1, f2);
     rlPushMatrix();
     rlTranslatef(a.x, 0.21f, a.z);
     rlScalef(0.7f, 0.7f, 0.7f);
@@ -551,6 +573,7 @@ void office::DrawHUD(bool titleMode) {
     case Zone::Arena:    DrawPrompt({ ARENA_POS.x, 2.2f, ARENA_POS.z }, Has(F_ARENA) ? "Vào võ đài: chơi thử game" : "Võ đài (chưa xây xong)"); break;
     case Zone::Shelf:    DrawPrompt({ SHELF_POS.x, 2.8f, SHELF_POS.z }, "Xem lộ trình dự án"); break;
     case Zone::Coffee:   DrawPrompt({ COFFEE_POS.x, 2.0f, COFFEE_POS.z }, "Uống cà phê (mẹo code)"); break;
+    case Zone::Door:     DrawPrompt({ DOOR_POS.x, 1.6f, DOOR_POS.z }, "Ra ngoài Đảo Lập Trình"); break;
     default: break;
     }
 
@@ -583,4 +606,10 @@ void office::DrawHUD(bool titleMode) {
     }
 
     if (O.roadmap) DrawRoadmap();
+}
+
+void office::SpawnAtDoor() {
+    O.dev.pos = { DOOR_POS.x, 0, DOOR_POS.z - 1.6f };
+    O.yaw = 90;
+    O.camPos = { O.dev.pos.x * 0.6f, 8.2f, O.dev.pos.z + 9.5f };
 }

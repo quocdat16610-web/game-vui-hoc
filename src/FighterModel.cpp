@@ -6,6 +6,7 @@
 //  stateTime, rồi dùng rlPushMatrix/rlRotatef để xoay (ma trận biến đổi).
 // =============================================================================
 #include "Arena.h"
+#include "Character.h"
 #include "Common.h"
 #include "Gfx.h"
 #include "rlgl.h"
@@ -150,7 +151,80 @@ namespace {
     }
 }
 
+// =============================================================================
+//  MODEL 3D CÓ XƯƠNG (KayKit): chọn hoạt ảnh theo trạng thái FSM
+// =============================================================================
+namespace {
+    const int SLOTS = 8;
+    AnimChar g_slots[SLOTS];
+
+    CharModel ModelFor(CharType t) {
+        switch (t) {
+        case CharType::Ninja:   return CharModel::RogueHooded;
+        case CharType::Samurai: return CharModel::Knight;
+        case CharType::Robot:   return CharModel::Barbarian;
+        case CharType::Custom:  return CharModel::Mage;
+        default:                return CharModel::Rogue;     // anh dev Minh
+        }
+    }
+
+    AnimChar* SlotFor(const Fighter& f) {
+        if (f.modelSlot < 0 || f.modelSlot >= SLOTS || f.type == CharType::Dummy || !chars::Ready()) return nullptr;
+        AnimChar& a = g_slots[f.modelSlot];
+        CharModel want = ModelFor(f.type);
+        if (!a.Loaded() || a.Kind() != want) a.Load(want);
+        return a.Loaded() ? &a : nullptr;
+    }
+}
+
+void UpdateFighterModel(const Fighter& f, bool animate, float dt) {
+    AnimChar* a = SlotFor(f);
+    if (!a) return;
+    float t = f.stateTime;
+    if (f.casual) {                                           // đi lại trong văn phòng / thế giới
+        if (f.state == FState::Walk) a->Play("Walking_A", true, 1.2f);
+        else a->Play("Idle");
+        a->Update(dt);
+        return;
+    }
+    if (!animate) {
+        // Trước Bài 10 (chưa có máy trạng thái hoạt ảnh): chỉ đứng thủ và bước đi, đòn đánh không có động tác
+        if (f.state == FState::Walk) a->Play("Walking_A");
+        else if (f.state == FState::KO) a->Play("Death_A_Pose");
+        else a->Play("Unarmed_Idle");
+        a->Update(dt);
+        return;
+    }
+    switch (f.state) {
+    case FState::Punch: a->Scrub("Unarmed_Melee_Attack_Punch_A", t / PUNCH_TIME, 0.12f, 0.72f); break;
+    case FState::Kick:  a->Scrub("Unarmed_Melee_Attack_Kick", t / KICK_TIME, 0.05f, 0.95f); break;
+    case FState::Hurt:  a->Scrub("Hit_A", t / HURT_TIME, 0.0f, 0.85f); break;
+    case FState::Block: a->Play("Blocking"); break;
+    case FState::KO:    a->Play("Death_A", false); break;
+    case FState::Victory: a->Play("Cheer"); break;
+    case FState::Walk:
+        if (f.dashTimer > 0) a->Play(f.moveDir * f.facing > 0 ? "Dodge_Forward" : "Dodge_Backward", false, 1.6f);
+        else a->Play(f.moveDir * f.facing >= 0 ? "Walking_A" : "Walking_Backwards", true, 1.3f);
+        break;
+    default:
+        a->Play("Unarmed_Idle");
+        break;
+    }
+    if (!f.onGround && f.state != FState::KO && f.state != FState::Punch && f.state != FState::Kick) a->Play("Jump_Idle");
+    a->Update(dt);
+}
+
 void DrawFighterModel(const Fighter& f, bool animate, float time) {
+    if (AnimChar* a = SlotFor(f)) {
+        if (!gfx::ShadowsOn()) {
+            float sh = 0.55f - std::min(f.pos.y, 2.0f) * 0.12f;
+            DrawCylinder({ f.pos.x, 0.012f, f.pos.z }, sh, sh, 0.01f, 16, Color{ 0, 0, 0, 90 });
+        }
+        (void)animate; (void)time;
+        a->Draw(f.pos, f.showcaseYaw != 999 ? f.showcaseYaw : (f.facing > 0 ? 90.0f : -90.0f), 0.8f, f.flash * 0.6f);
+        return;
+    }
+
     if (!gfx::ShadowsOn()) {            // không có bóng đổ thật thì vẽ bóng tròn giả
         float sh = 0.55f - std::min(f.pos.y, 2.0f) * 0.12f;
         DrawCylinder({ f.pos.x, 0.012f, f.pos.z }, sh, sh, 0.01f, 16, Color{ 0, 0, 0, 90 });

@@ -41,6 +41,8 @@ add_executable(CodeVoDai
     src/Challenges.cpp
     src/PlayerCode.cpp
     src/CodeEditor.cpp
+    src/Character.cpp
+    src/World.cpp
 )
 target_link_libraries(CodeVoDai PRIVATE raylib)
 

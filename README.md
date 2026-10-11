@@ -2,7 +2,19 @@
 
 **Code Võ Đài** là một game 3D chạy trực tiếp trên máy (file `.exe`, không cần trình duyệt), viết bằng **C++17 + [raylib](https://www.raylib.com)**.
 
-Bạn vào vai **Minh**, một dev indie đang viết một **game đối kháng 3D** bằng C++. Trong văn phòng 3D của Minh:
+Bạn vào vai **Minh**, một dev indie đang viết một **game đối kháng 3D** bằng C++.
+
+## 🏝️ Đảo Lập Trình — thế giới mở do CHÍNH BẠN xây
+
+Vào game, bạn đứng trên một hòn đảo lục giác **gần như trống trơn**: chỉ có đất, nước và Studio của Minh. **Mọi thứ còn lại do bạn tự tay xây** — game chỉ cung cấp kiến thức, không có code giải sẵn:
+
+- ⌨️ **Phím `C` — Bản thiết kế**: tự viết code C++ trong hàm `void XayDung()` rồi bấm `F5`. Game "cắm" sẵn các lệnh như `Dat(q, r, NHA)`, `Xoa(q, r)`, `OTrong(q, r)`, `KhoangCach(...)`, `LangGiengQ/R(h)`, `NgauNhien(a, b)`... Muốn trồng 100 cây? Tự viết vòng `for`. Muốn cả khu phố? Hai vòng `for` lồng nhau. Bên cạnh có **8 thẻ Kiến thức** giải thích cú pháp (gọi hàm, biến, for, if, hàm tự viết, vòng lặp lồng nhau, continue/break, lưới lục giác) bằng ví dụ không liên quan — phần xây là của bạn. Code lưu ở `code/ban_thiet_ke.cpp`.
+- 🖱️ **Phím `B` — Chế độ xây**: đặt / xóa / xoay từng vật thể bằng chuột (Ctrl+Z để hoàn tác).
+- 🏠 30+ vật thể của bộ KayKit Medieval Hexagon: nhà, chợ, giếng, lò rèn, cối xay, tháp, cây, đá, núi, đèn đường... **Đường đi tự nối** (auto-tiling bằng bitmask). Một số công trình mở khóa theo bài học.
+- 🏟️ **Đấu trường** và 📖 **Thư viện** bạn xây xong thì đi vào được (chơi game đối kháng / học bài). Mỗi ngôi nhà có **dân làng** đến ở, đi dạo và đố bạn câu hỏi về bài đã học.
+- 🌗 Chu kỳ **ngày / đêm**, đèn đường tự sáng khi trời tối, bóng đổ, mây trôi, bản đồ nhỏ, 8 nhiệm vụ gợi ý (có xu thưởng). Thế giới tự lưu vào `world.txt`.
+
+Đi tới cửa Studio (tòa nhà đỏ) và nhấn `E` để vào văn phòng 3D của Minh:
 
 - 💻 **Máy tính**: học 16 bài từ cơ bản đến nâng cao (lý thuyết, code mẫu tô màu, câu hỏi trắc nghiệm).
 - 🥊 **Võ đài**: chơi thử game đối kháng mà Minh đang làm. **Mỗi bài học xong sẽ mở khóa đúng một tính năng** của game: học "hàm" thì có đòn đấm, học "AABB" thì có hitbox, học "AI" thì bao cát biến thành đối thủ biết đánh trả...
@@ -48,7 +60,7 @@ Mọi khái niệm trong bài học đều có **file ví dụ chạy được**
 2. Giải nén ra một thư mục.
 3. Bấm đúp `CodeVoDai.exe`.
 
-> Phải giữ thư mục `assets/` nằm cạnh `CodeVoDai.exe` (chứa font tiếng Việt). Tiến độ học được lưu vào file `save.txt` cùng thư mục.
+> Phải giữ thư mục `assets/` nằm cạnh `CodeVoDai.exe` (chứa font tiếng Việt, model 3D, shader). Tiến độ học được lưu vào file `save.txt` cùng thư mục.
 >
 > Windows SmartScreen có thể cảnh báo vì file exe chưa được ký số: chọn **More info → Run anyway**.
 
@@ -58,7 +70,10 @@ Mỗi lần push code, GitHub Actions cũng build lại bản Windows bằng Vis
 
 | Ở đâu | Phím |
 |---|---|
-| Văn phòng | `W A S D` / phím mũi tên: đi lại · `E`: tương tác |
+| Đảo Lập Trình | `W A S D`: đi · `Shift`: chạy · `Space`: nhảy · chuột phải kéo / `Q`: xoay camera · lăn chuột: zoom · `E`: tương tác · `B`: xây bằng chuột · `C`: xây bằng code |
+| Chế độ xây (`B`) | chuột trái: đặt · chuột phải / `X`: xóa · `R`: xoay · `Tab` / `,` `.`: đổi vật thể · `Ctrl+Z`: hoàn tác · `Q E`: xoay camera |
+| Bản thiết kế (`C`) | `F5`: chạy `XayDung()` · `Esc`: rời ô code · `C`/`Esc`: đóng |
+| Văn phòng | `W A S D` / phím mũi tên: đi lại · `E`: tương tác · thảm đỏ ở cửa: ra đảo |
 | Máy tính (bài học) | `→` / `Enter`: tiếp · `←`: quay lại · `1-4`: chọn đáp án · `R`: thử lại · con lăn chuột: cuộn · `Esc`: thoát |
 | Thử thách code | `F5` hoặc `Ctrl+Enter`: chạy test · `Ctrl+Z/Y`: hoàn tác/làm lại · `Ctrl+C/X/V/A` · `Ctrl+/`: chú thích · `Tab`/`Shift+Tab`: thụt lề · `Esc`: rời ô code |
 | Võ đài | `A D`: đi · `W`/`Space`: nhảy · `J`: đấm · `K`: đá · `L` (giữ): đỡ · `Shift`: lướt · `H`: xem hitbox · `P`: tạm dừng · `Esc`: về văn phòng |
@@ -67,7 +82,7 @@ Mỗi lần push code, GitHub Actions cũng build lại bản Windows bằng Vis
 
 Phím chỉ hoạt động khi bạn đã học bài tương ứng. Bấm phím của tính năng chưa học, game sẽ nhắc bạn cần học bài nào.
 
-Dành cho giáo viên / muốn xem trước: trong văn phòng nhấn `F10` để mở khóa toàn bộ. Có thể chạy kèm tham số: `CodeVoDai.exe --unlock-all`, `--reset` (xóa tiến độ), `--lessons=5` (coi như đã học 5 bài).
+Dành cho giáo viên / muốn xem trước: trong văn phòng nhấn `F10` để mở khóa toàn bộ. Có thể chạy kèm tham số: `CodeVoDai.exe --unlock-all`, `--reset` (xóa tiến độ), `--lessons=5` (coi như đã học 5 bài), `--hour=21` (đặt giờ trên đảo).
 
 ## 3. Lộ trình 16 bài
 
@@ -147,6 +162,8 @@ Sau khi học xong, hãy đọc `src/` theo thứ tự này:
 | [`src/FighterModel.cpp`](src/FighterModel.cpp) | Dựng võ sĩ từ khối hình, hoạt ảnh khớp tay/chân | 9, 10 |
 | [`src/Gfx.cpp`](src/Gfx.cpp) + [`assets/shaders/`](assets/shaders) | Shader ánh sáng, bóng đổ, bloom, FXAA | 15 |
 | [`src/Audio.cpp`](src/Audio.cpp) | Tổng hợp tiếng đấm/đá/đỡ và nhạc nền bằng toán | 16 |
+| [`src/World.cpp`](src/World.cpp) | **Đảo Lập Trình**: lưới lục giác, sinh đảo bằng noise, gộp lưới, đường tự nối, API xây dựng cho code người chơi, ngày/đêm, dân làng | 2, 3, 6, 9, 13 |
+| [`src/Character.cpp`](src/Character.cpp) | Nạp model glTF có xương, gắn mũ/áo vào xương, phát hoạt ảnh | 10 |
 | [`src/Office.cpp`](src/Office.cpp) | Văn phòng 3D, di chuyển, va chạm với đồ vật, render texture | 9, 11, 13 |
 | [`src/LessonScreen.cpp`](src/LessonScreen.cpp) | Màn hình học, quiz | 2, 7 |
 | [`src/Lessons.cpp`](src/Lessons.cpp) | Toàn bộ nội dung bài học (dạng dữ liệu) | 14 |
@@ -166,6 +183,8 @@ src/                  mã nguồn game
 lessons/              16 file ví dụ cho 16 bài học
 assets/fonts/         font hỗ trợ tiếng Việt (DejaVu Sans, JetBrains Mono)
 assets/shaders/       shader GLSL: ánh sáng, bóng đổ, hậu kỳ (sửa thử được!)
+assets/models/        model 3D KayKit (nhân vật có xương + bộ ô lục giác thời trung cổ)
+tools/                script Python chuẩn bị model (tách hoạt ảnh, chép file)
 cmake/                toolchain build .exe Windows từ Linux
 release/              bản Windows dựng sẵn
 .github/workflows/    CI: build Windows (Visual Studio) + Linux
@@ -176,3 +195,4 @@ release/              bản Windows dựng sẵn
 - Font DejaVu: giấy phép Bitstream Vera (xem `assets/fonts/LICENSE-DejaVu.txt`).
 - Font JetBrains Mono: SIL Open Font License 1.1 (xem `assets/fonts/LICENSE-JetBrainsMono.txt`).
 - raylib: giấy phép zlib.
+- Model 3D: [KayKit Character Pack: Adventurers](https://kaylousberg.itch.io/kaykit-adventurers) và [KayKit Medieval Hexagon Pack](https://kaylousberg.itch.io/kaykit-medieval-hexagon) của Kay Lousberg — CC0 (xem `assets/models/*/LICENSE-*.txt`).

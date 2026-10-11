@@ -3,11 +3,13 @@
 //
 //  main.cpp: điểm bắt đầu chương trình. Chứa GAME LOOP chính (Bài 2):
 //      while (cửa sổ còn mở) { 1. cập nhật (Update)  2. vẽ (Draw) }
-//  và chuyển qua lại giữa các màn hình: Title -> Office <-> Lesson / Arena.
+//  và chuyển qua lại giữa các màn hình:
+//      Title -> World (Đảo Lập Trình) <-> Office (Studio) <-> Lesson / Arena
 // =============================================================================
 #include "raylib.h"
 #include "Arena.h"
 #include "Audio.h"
+#include "Character.h"
 #include "Common.h"
 #include "Gfx.h"
 #include "LessonScreen.h"
@@ -15,10 +17,16 @@
 #include "Office.h"
 #include "PlayerCode.h"
 #include "UI.h"
+#include "World.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+
+static const char* WORLD_INTRO =
+    "Chào mừng tới Đảo Lập Trình! Hòn đảo này gần như trống trơn — mọi thứ trên đảo sẽ do CHÍNH BẠN xây. "
+    "Nhấn C để mở Bản thiết kế và TỰ VIẾT code C++ (ví dụ Dat(2, 1, NHA);), hoặc B để đặt bằng chuột. "
+    "Chưa biết code? Vào Studio của Minh (tòa nhà đỏ, nhấn E ở cửa) để học từ Bài 1.";
 
 static const char* INTRO =
     "Chào bạn! Mình là Minh, một dev indie. Mình đang làm game đối kháng 3D \"Code Võ Đài\" bằng C++ "
@@ -40,7 +48,7 @@ static void DrawTitle(float time) {
         ui::Text(title, (W - m.x) / 2 + i * 1.5f * s, y + i * 1.5f * s, ts, Color{ 120, 60, 0, (unsigned char)(40 + i * 20) }, FS_BOLD);
     ui::Text(title, (W - m.x) / 2, y, ts, pal::accent, FS_BOLD);
 
-    ui::TextCentered("Theo chân anh dev Minh viết một game đối kháng 3D, từ biến int đầu tiên đến AI và camera",
+    ui::TextCentered("Học C++ cùng anh dev Minh, rồi TỰ VIẾT CODE xây cả một hòn đảo và game đối kháng 3D",
                      W / 2, y + ts + 12 * s, 20 * s, pal::text);
 
     float a = 0.55f + 0.45f * std::sin(time * 3.0f);
@@ -74,11 +82,16 @@ int main(int argc, char** argv) {
     gfx::Init();
     gfx::SetQuality(g_progress.gfxQuality);
     sfx::Init();
+    chars::Init();                // hoạt ảnh nhân vật 3D (KayKit)
     arena::Init();
     office::Init();
+    world::Init();                // Đảo Lập Trình (cần assets/models/world)
+    for (int i = 1; i < argc; ++i)
+        if (std::strncmp(argv[i], "--hour=", 7) == 0) world::SetHour((float)std::atof(argv[i] + 7));
     pcode::LoadAll();             // nạp code người chơi đã viết (thư mục code/)
 
     Screen screen = Screen::Title;
+    Screen lessonFrom = Screen::Office, arenaFrom = Screen::Office;   // quay về đâu khi thoát
     float time = 0;
     std::string toast;            // thông báo nhỏ góc màn hình
     float toastTime = 0;
@@ -97,7 +110,7 @@ int main(int argc, char** argv) {
             toast = std::string("Đồ họa: ") + gfx::QualityName();
             toastTime = 2.0f;
         }
-        if (IsKeyPressed(KEY_M) && !lessonscreen::WantsTextInput()) {
+        if (IsKeyPressed(KEY_M) && !lessonscreen::WantsTextInput() && !(screen == Screen::World && world::WantsTextInput())) {
             sfx::ToggleMute();
             toast = sfx::Muted() ? "Âm thanh: TẮT" : "Âm thanh: BẬT";
             toastTime = 2.0f;
@@ -111,10 +124,23 @@ int main(int argc, char** argv) {
         // ---------------- 1. UPDATE ----------------
         switch (screen) {
         case Screen::Title:
-            office::Update(dt, true);
+            if (world::Ready()) world::Update(dt, true);
+            else office::Update(dt, true);
             if (IsKeyPressed(KEY_ENTER) || IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                screen = Screen::Office;
                 sfx::Play(sfx::CLICK, 0);
+                if (world::Ready()) {
+                    screen = Screen::World;
+                    world::SpawnAtStudio();
+                    if (!g_progress.introSeen) {
+                        world::Say("Minh", WORLD_INTRO, 16);
+                        g_progress.introSeen = true;
+                        g_progress.Save();
+                    } else {
+                        world::Say("Minh", "Chào mừng trở lại đảo! Nhấn C để viết code xây tiếp, hoặc vào Studio học bài mới.", 6);
+                    }
+                    break;
+                }
+                screen = Screen::Office;
                 if (!g_progress.introSeen) {
                     office::Say(INTRO, 14);
                     g_progress.introSeen = true;
@@ -128,6 +154,26 @@ int main(int argc, char** argv) {
             }
             break;
 
+        case Screen::World: {
+            world::Action act = world::Update(dt, false);
+            if (act == world::Action::EnterOffice) {
+                office::SpawnAtDoor();
+                screen = Screen::Office;
+                if (g_progress.completed < F_COUNT)
+                    office::Say(TextFormat("Vào đây! Bài tiếp theo là Bài %d: %s. Máy tính ở bàn phía sau.",
+                                           g_progress.completed + 1, GetLessons()[g_progress.completed].title.c_str()), 6);
+            } else if (act == world::Action::OpenLesson) {
+                lessonscreen::Open(std::min(g_progress.completed, (int)F_COUNT - 1));
+                lessonFrom = Screen::World;
+                screen = Screen::Lesson;
+            } else if (act == world::Action::EnterArena) {
+                arena::Enter();
+                arenaFrom = Screen::World;
+                screen = Screen::Arena;
+            }
+            break;
+        }
+
         case Screen::Office: {
             office::Action act = office::Update(dt, false);
             if (IsKeyPressed(KEY_F10)) {        // phím bí mật cho giáo viên: mở khóa tất cả
@@ -138,26 +184,35 @@ int main(int argc, char** argv) {
             if (act != office::Action::None) sfx::Play(sfx::CLICK, 0);
             if (act == office::Action::OpenComputer) {
                 lessonscreen::Open(std::min(g_progress.completed, (int)F_COUNT - 1));
+                lessonFrom = Screen::Office;
                 screen = Screen::Lesson;
             } else if (act == office::Action::EnterArena) {
                 arena::Enter();
+                arenaFrom = Screen::Office;
                 screen = Screen::Arena;
+            } else if (act == office::Action::ExitToWorld && world::Ready()) {
+                world::SpawnAtStudio();
+                screen = Screen::World;
             }
             break;
         }
 
         case Screen::Lesson:
             if (lessonscreen::Update(dt)) {
-                screen = Screen::Office;
+                screen = lessonFrom;
                 std::string msg = lessonscreen::TakeMessage();
-                if (!msg.empty()) office::Say(msg, 9);
+                if (!msg.empty()) {
+                    if (screen == Screen::World) world::Say("Thư viện", msg, 9);
+                    else office::Say(msg, 9);
+                }
             }
             break;
 
         case Screen::Arena:
             if (arena::Update(dt)) {
-                screen = Screen::Office;
-                if (g_progress.completed < F_COUNT)
+                screen = arenaFrom;
+                if (screen == Screen::World) world::SpawnAtArena();
+                else if (g_progress.completed < F_COUNT)
                     office::Say("Chơi thử vui đấy! Nhưng game còn thiếu nhiều thứ. Quay lại máy tính code thêm tính năng nào.", 5);
             }
             break;
@@ -167,12 +222,15 @@ int main(int argc, char** argv) {
 
         // ---------------- 2. DRAW ----------------
         // a) Các thứ vẽ "ngoài màn hình": bóng đổ, màn hình máy tính, bảng LED
+        bool showWorld = world::Ready() && (screen == Screen::World || screen == Screen::Title);
         if (screen == Screen::Arena) arena::RenderOffscreen();
+        else if (showWorld) world::RenderOffscreen();
         else office::RenderOffscreen();
 
         // b) Cảnh 3D. Đồ họa cao: vẽ vào texture rồi xử lý hậu kỳ (bloom, FXAA...)
         auto draw3D = [&] {
             if (screen == Screen::Arena) arena::Draw3D();
+            else if (showWorld) world::Draw3D();
             else office::Draw3D();
         };
         bool post = gfx::PostEnabled();
@@ -190,6 +248,7 @@ int main(int argc, char** argv) {
         // c) Giao diện 2D vẽ sau cùng, nằm trên cảnh 3D
         switch (screen) {
         case Screen::Title:  DrawTitle(time); break;
+        case Screen::World:  world::DrawHUD(); break;
         case Screen::Office: office::DrawHUD(false); break;
         case Screen::Lesson: lessonscreen::Draw(); break;
         case Screen::Arena:  arena::DrawHUD(); break;
@@ -205,8 +264,10 @@ int main(int argc, char** argv) {
         EndDrawing();
     }
 
+    world::Shutdown();
     office::Shutdown();
     arena::Shutdown();
+    chars::Shutdown();
     sfx::Shutdown();
     gfx::Shutdown();
     ui::UnloadFonts();

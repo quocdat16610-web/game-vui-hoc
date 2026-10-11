@@ -133,6 +133,7 @@ static void ResetFighter(Fighter& f, CharType t, bool player) {
     f = Fighter{};
     f.type = t;
     f.isPlayer = player;
+    f.modelSlot = player ? 0 : 1;
     f.maxHp = f.hp = GetCharacterStats(t).maxHp;
     f.pos = { player ? -2.2f : 2.2f, 0, 0 };
     f.facing = player ? 1.0f : -1.0f;
@@ -186,6 +187,7 @@ void arena::Enter() {
         S.p1 = Fighter{};
         S.p1.type = SelType(S.selChar);
         S.p1.isPlayer = true;
+        S.p1.modelSlot = 0;
         S.p2 = Fighter{};
     } else {
         StartMatch();
@@ -485,6 +487,7 @@ static void UpdateFighter(Fighter& f, const Input& in, const Fighter& foe, float
         tocDo = 18.0f;
         f.dashTimer -= dt;
     }
+    f.moveDir = huong;
     if (huong != 0 && dt > 0)                          // Bài 8: hàm DiChuyen của người chơi
         f.pos.x = pcode::DiChuyen(f.pos.x, huong, tocDo, dt, f.pos.x + huong * tocDo * dt);
     f.pos.x += f.vel.x * dt;
@@ -563,6 +566,7 @@ bool arena::Update(float dt) {
 
     if (S.phase == Phase::Select) {
         UpdateSelect();
+        UpdateFighterModel(S.p1, true, dt);
         UpdateCam(dt);
         return S.wantExit;
     }
@@ -578,6 +582,8 @@ bool arena::Update(float dt) {
     if (S.paused) return S.wantExit;
 
     if (S.phase == Phase::MatchOver) {
+        UpdateFighterModel(S.p1, Has(F_ANIM_STATES), dt);
+        UpdateFighterModel(S.p2, Has(F_ANIM_STATES), dt);
         UpdateParticles(dt);
         UpdateCam(dt);
         if (IsKeyPressed(KEY_ENTER)) arena::Enter();
@@ -600,6 +606,8 @@ bool arena::Update(float dt) {
     }
     UpdateFighter(S.p1, in1, S.p2, gdt);
     UpdateFighter(S.p2, in2, S.p1, gdt);
+    UpdateFighterModel(S.p1, Has(F_ANIM_STATES), gdt);   // hoạt ảnh model 3D (dừng theo hit-stop)
+    UpdateFighterModel(S.p2, Has(F_ANIM_STATES), gdt);
 
     CheckAttack(S.p1, S.p2);
     CheckAttack(S.p2, S.p1);
@@ -872,7 +880,11 @@ static void DrawStageGlow() {
 
 static void DrawCasters() {
     bool anim = Has(F_ANIM_STATES);
-    DrawFighterModel(S.p1, anim, S.time);
+    {
+        Fighter p1 = S.p1;                                   // màn chọn: xoay mặt về phía camera
+        if (S.phase == Phase::Select) p1.showcaseYaw = 20.0f + std::sin(S.time * 0.8f) * 25.0f;
+        DrawFighterModel(p1, anim, S.time);
+    }
     if (S.phase != Phase::Select) DrawFighterModel(S.p2, anim, S.time);
     for (int s = -1; s <= 1; s += 2)
         for (int sz = -1; sz <= 1; sz += 2)
@@ -935,7 +947,11 @@ void arena::Draw3D() {
     gfx::BeginLit(S.cam);
     DrawStageSolid();
     bool anim = Has(F_ANIM_STATES);
-    DrawFighterModel(S.p1, anim, S.time);
+    {
+        Fighter p1 = S.p1;                                   // màn chọn: xoay mặt về phía camera
+        if (S.phase == Phase::Select) p1.showcaseYaw = 20.0f + std::sin(S.time * 0.8f) * 25.0f;
+        DrawFighterModel(p1, anim, S.time);
+    }
     if (S.phase != Phase::Select) DrawFighterModel(S.p2, anim, S.time);
     gfx::EndLit();
     DrawStageGlow();
